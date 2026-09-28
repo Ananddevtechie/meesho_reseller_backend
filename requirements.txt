@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pydantic-settings
+anthropic
+httpx
+beautifulsoup4
+playwright
+python-dotenv
