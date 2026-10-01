@@ -27,7 +27,7 @@ CREATE TABLE products (
 );
 
 CREATE TABLE customers (
-    id VARCHAR(36) PRIMARY KEY,
+    id VARCHAR(141) PRIMARY KEY,
     full_name VARCHAR(120) NOT NULL,
     email VARCHAR(255),
     mobile VARCHAR(20) NOT NULL,
@@ -39,7 +39,8 @@ CREATE TABLE customers (
     state VARCHAR(100) NOT NULL,
     pincode VARCHAR(6) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uq_customers_name_mobile UNIQUE (full_name, mobile)
 );
 
 CREATE TABLE orders (
@@ -82,7 +83,7 @@ CREATE TABLE orders (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
     user_id VARCHAR(36) REFERENCES users(id),
-    customer_id VARCHAR(36) REFERENCES customers(id),
+    customer_id VARCHAR(141) REFERENCES customers(id),
     CONSTRAINT uq_orders_idempotency_key UNIQUE (idempotency_key)
 );
 

@@ -14,9 +14,10 @@ router = APIRouter(prefix='/api/customers', tags=['customers'])
 @router.post('/upsert', response_model=CustomerSaveResponse)
 def save_customer(request: CustomerSaveRequest) -> CustomerSaveResponse:
 	values = request.model_dump()
+	values['id'] = f'{request.full_name}:{request.mobile}'
 	statement = insert(Customer).values(**values)
 	statement = statement.on_conflict_do_update(
-		constraint='uq_customers_mobile',
+		constraint='uq_customers_name_mobile',
 		set_={
 			'full_name': statement.excluded.full_name,
 			'alternate_mobile': statement.excluded.alternate_mobile,

@@ -51,7 +51,7 @@ class CustomerSaveResponse(BaseModel):
 class CodOrderRequest(BaseModel):
 	product_id: str = Field(min_length=1, max_length=100)
 	quantity: int = Field(ge=1, le=10)
-	customer_id: Optional[str] = Field(default=None, min_length=36, max_length=36)
+	customer_id: Optional[str] = Field(default=None, min_length=13, max_length=141)
 	full_name: str = Field(min_length=2, max_length=120)
 	mobile: str = Field(pattern=r'^[6-9][0-9]{9}$')
 	alternate_mobile: Optional[str] = Field(default=None, pattern=r'^[6-9][0-9]{9}$')

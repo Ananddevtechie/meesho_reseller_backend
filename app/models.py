@@ -59,9 +59,9 @@ class Product(Base):
 
 class Customer(Base):
 	__tablename__ = 'customers'
-	__table_args__ = (UniqueConstraint('mobile', name='uq_customers_mobile'),)
+	__table_args__ = (UniqueConstraint('full_name', 'mobile', name='uq_customers_name_mobile'),)
 
-	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	id: Mapped[str] = mapped_column(String(141), primary_key=True)
 	full_name: Mapped[str] = mapped_column(String(120), nullable=False)
 	email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 	mobile: Mapped[str] = mapped_column(String(20), nullable=False)
