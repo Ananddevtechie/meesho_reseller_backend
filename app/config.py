@@ -12,7 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 class Settings(BaseSettings):
 	gemini_api_key: str = ''
 	gemini_model: str = 'gemini-2.0-flash'
-	database_url: str = f'sqlite:///{BACKEND_ROOT / "data" / "orders.sqlite3"}'
+	database_url: str
 	cod_product_id: str = 'everyday-product'
 	cod_product_title: str = 'Premium Everyday Product'
 	cod_product_price: Decimal = Decimal('399.00')

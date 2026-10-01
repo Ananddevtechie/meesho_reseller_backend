@@ -1,47 +1,163 @@
-CREATE TABLE customers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    phone VARCHAR(20) NOT NULL,
-    address_line1 VARCHAR(255) NOT NULL,
-    address_line2 VARCHAR(255),
-    city VARCHAR(100),
-    state VARCHAR(100),
-    pincode VARCHAR(10) NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
+CREATE TABLE users (
+    id VARCHAR(36) PRIMARY KEY,
+    full_name VARCHAR(120) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(30) NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uq_users_email UNIQUE (email)
 );
 
-CREATE TABLE pricing_rules (
-    id SERIAL PRIMARY KEY,
-    category VARCHAR(100) DEFAULT 'default',
-    margin_type VARCHAR(10) CHECK (margin_type IN ('flat','percent')),
-    value NUMERIC(10,2) NOT NULL,
-    active BOOLEAN DEFAULT TRUE
+CREATE TABLE products (
+    id VARCHAR(100) PRIMARY KEY,
+    sku VARCHAR(100) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    image_url TEXT,
+    cost_price NUMERIC(12, 2) NOT NULL,
+    selling_price NUMERIC(12, 2) NOT NULL,
+    mrp NUMERIC(12, 2) NOT NULL,
+    stock_quantity INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uq_products_sku UNIQUE (sku)
+);
+
+CREATE TABLE customers (
+    id VARCHAR(36) PRIMARY KEY,
+    full_name VARCHAR(120) NOT NULL,
+    email VARCHAR(255),
+    mobile VARCHAR(20) NOT NULL,
+    alternate_mobile VARCHAR(20),
+    address_line1 VARCHAR(255) NOT NULL,
+    address_line2 VARCHAR(255) NOT NULL,
+    landmark VARCHAR(255),
+    city VARCHAR(100) NOT NULL,
+    state VARCHAR(100) NOT NULL,
+    pincode VARCHAR(6) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
 CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    raw_input TEXT,
-    customer_id INTEGER REFERENCES customers(id),
-    product_link TEXT NOT NULL,
-    product_title VARCHAR(255),
-    product_image_url TEXT,
-    variant JSONB,
-    quantity INTEGER DEFAULT 1,
-    base_price NUMERIC(10,2),
-    margin_applied NUMERIC(10,2),
-    final_price NUMERIC(10,2),
-    payment_mode VARCHAR(10) DEFAULT 'COD',
-    status VARCHAR(30) DEFAULT 'draft',
-    meesho_order_id VARCHAR(100),
-    awb_number VARCHAR(100),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    id VARCHAR(40) PRIMARY KEY,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_fingerprint VARCHAR(64) NOT NULL,
+    product_id VARCHAR(100) NOT NULL,
+    product_sku VARCHAR(100) NOT NULL,
+    product_title VARCHAR(255) NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price NUMERIC(12, 2) NOT NULL,
+    mrp NUMERIC(12, 2) NOT NULL,
+    subtotal NUMERIC(12, 2) NOT NULL,
+    discount NUMERIC(12, 2) NOT NULL,
+    shipping NUMERIC(12, 2) NOT NULL,
+    tax NUMERIC(12, 2) NOT NULL,
+    cod_fee NUMERIC(12, 2) NOT NULL,
+    total NUMERIC(12, 2) NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    payment_method VARCHAR(20) NOT NULL,
+    payment_status VARCHAR(30) NOT NULL,
+    order_status VARCHAR(30) NOT NULL,
+    payment_reference VARCHAR(255),
+    customer_name VARCHAR(120) NOT NULL,
+    customer_email VARCHAR(255),
+    customer_mobile VARCHAR(20) NOT NULL,
+    alternate_mobile VARCHAR(20),
+    address_line1 VARCHAR(255) NOT NULL,
+    address_line2 VARCHAR(255) NOT NULL,
+    landmark VARCHAR(255),
+    city VARCHAR(100) NOT NULL,
+    state VARCHAR(100) NOT NULL,
+    pincode VARCHAR(6) NOT NULL,
+    expected_delivery_range VARCHAR(120) NOT NULL,
+    email_status VARCHAR(20) NOT NULL,
+    email_attempts INTEGER NOT NULL,
+    email_error TEXT,
+    whatsapp_opt_in BOOLEAN NOT NULL,
+    whatsapp_status VARCHAR(30) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    user_id VARCHAR(36) REFERENCES users(id),
+    customer_id VARCHAR(36) REFERENCES customers(id),
+    CONSTRAINT uq_orders_idempotency_key UNIQUE (idempotency_key)
 );
 
-CREATE TABLE order_status_log (
-    id SERIAL PRIMARY KEY,
-    order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+CREATE TABLE order_items (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(40) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id VARCHAR(100) REFERENCES products(id),
+    product_sku VARCHAR(100) NOT NULL,
+    product_title VARCHAR(255) NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price NUMERIC(12, 2) NOT NULL,
+    discount NUMERIC(12, 2) NOT NULL,
+    line_total NUMERIC(12, 2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE payments (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(40) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    provider VARCHAR(40) NOT NULL,
+    provider_order_id VARCHAR(120),
+    provider_payment_id VARCHAR(120),
+    method VARCHAR(30) NOT NULL,
     status VARCHAR(30) NOT NULL,
-    note TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    amount NUMERIC(12, 2) NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE shipments (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(40) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    carrier VARCHAR(100),
+    tracking_number VARCHAR(120),
+    status VARCHAR(30) NOT NULL,
+    shipped_at TIMESTAMP WITH TIME ZONE,
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE expenses (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) REFERENCES users(id),
+    category VARCHAR(80) NOT NULL,
+    description TEXT,
+    amount NUMERIC(12, 2) NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    expense_date DATE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE profit_loss (
+    id VARCHAR(36) PRIMARY KEY,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    revenue NUMERIC(12, 2) NOT NULL,
+    cost_of_goods NUMERIC(12, 2) NOT NULL,
+    expenses NUMERIC(12, 2) NOT NULL,
+    net_profit NUMERIC(12, 2) NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    generated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE notifications (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(40) REFERENCES orders(id) ON DELETE SET NULL,
+    customer_id VARCHAR(36) REFERENCES customers(id) ON DELETE SET NULL,
+    channel VARCHAR(30) NOT NULL,
+    recipient VARCHAR(255) NOT NULL,
+    subject VARCHAR(255),
+    status VARCHAR(30) NOT NULL,
+    provider_message_id VARCHAR(255),
+    error TEXT,
+    sent_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );

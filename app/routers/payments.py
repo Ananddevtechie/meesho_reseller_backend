@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Order
+from app.models import Customer, Order
 from app.schemas import (
 	CodOrderRequest,
 	PaidOrderResponse,
@@ -154,6 +154,23 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
 			detail='Razorpay is not configured. Set the Razorpay test API keys in backend/.env.',
 		)
+	with SessionLocal() as session:
+		customer = session.get(Customer, request.customer_id) if request.customer_id else None
+		if not customer:
+			raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Save customer details before starting payment.')
+		customer_details = {
+			'id': customer.id,
+			'full_name': customer.full_name,
+			'email': customer.email,
+			'mobile': customer.mobile,
+			'alternate_mobile': customer.alternate_mobile,
+			'address_line1': customer.address_line1,
+			'address_line2': customer.address_line2,
+			'landmark': customer.landmark,
+			'city': customer.city,
+			'state': customer.state,
+			'pincode': customer.pincode,
+		}
 	subtotal, discount, total = _priced_total(request)
 	amount = int((total * 100).to_integral_exact())
 	order_id = f"ORD-{uuid.uuid4().hex[:16].upper()}"
@@ -167,6 +184,7 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		idempotency_key=f'UPI-{provider_order_id}',
 		request_fingerprint=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
 		product_id=settings.cod_product_id,
+		customer_id=customer_details['id'],
 		product_sku=settings.cod_product_id,
 		product_title=settings.cod_product_title,
 		quantity=request.quantity,
@@ -183,16 +201,16 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		payment_status='PAYMENT_PENDING',
 		order_status='PAYMENT_PENDING',
 		payment_reference=provider_order_id,
-		customer_name=request.full_name,
-		customer_email=request.customer_email,
-		customer_mobile=request.mobile,
-		alternate_mobile=request.alternate_mobile,
-		address_line1=request.address_line1,
-		address_line2=request.address_line2,
-		landmark=request.landmark,
-		city=request.city,
-		state=request.state,
-		pincode=request.pin,
+		customer_name=customer_details['full_name'],
+		customer_email=customer_details['email'],
+		customer_mobile=customer_details['mobile'],
+		alternate_mobile=customer_details['alternate_mobile'],
+		address_line1=customer_details['address_line1'],
+		address_line2=customer_details['address_line2'],
+		landmark=customer_details['landmark'],
+		city=customer_details['city'],
+		state=customer_details['state'],
+		pincode=customer_details['pincode'],
 		expected_delivery_range=settings.cod_expected_delivery_range,
 		email_status='PENDING',
 		email_attempts=0,
@@ -212,9 +230,9 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		amount=amount,
 		currency='INR',
 		product_title=settings.cod_product_title,
-		customer_name=request.full_name,
-		customer_mobile=request.mobile,
-		customer_email=request.customer_email,
+		customer_name=customer_details['full_name'],
+		customer_mobile=customer_details['mobile'],
+		customer_email=customer_details['email'],
 	)
 
 

@@ -17,9 +17,41 @@ class ExtractedAddress(BaseModel):
 	mobile: str = ''
 
 
+class CustomerSaveRequest(BaseModel):
+	full_name: str = Field(min_length=2, max_length=120)
+	mobile: str = Field(pattern=r'^[6-9][0-9]{9}$')
+	alternate_mobile: Optional[str] = Field(default=None, pattern=r'^[6-9][0-9]{9}$')
+	address_line1: str = Field(min_length=2, max_length=255)
+	address_line2: str = Field(min_length=2, max_length=255)
+	pincode: str = Field(pattern=r'^[0-9]{6}$')
+	city: str = Field(min_length=2, max_length=100)
+	state: str = Field(min_length=2, max_length=100)
+	landmark: Optional[str] = Field(default=None, max_length=255)
+
+	@field_validator('full_name', 'address_line1', 'address_line2', 'city', 'state')
+	@classmethod
+	def normalize_required_text(cls, value: str) -> str:
+		normalized = value.strip()
+		if not normalized:
+			raise ValueError('This field cannot be blank.')
+		return normalized
+
+	@field_validator('landmark', mode='before')
+	@classmethod
+	def normalize_landmark(cls, value: Optional[str]) -> Optional[str]:
+		if isinstance(value, str):
+			return value.strip() or None
+		return value
+
+
+class CustomerSaveResponse(BaseModel):
+	customer_id: str
+
+
 class CodOrderRequest(BaseModel):
 	product_id: str = Field(min_length=1, max_length=100)
 	quantity: int = Field(ge=1, le=10)
+	customer_id: Optional[str] = Field(default=None, min_length=36, max_length=36)
 	full_name: str = Field(min_length=2, max_length=120)
 	mobile: str = Field(pattern=r'^[6-9][0-9]{9}$')
 	alternate_mobile: Optional[str] = Field(default=None, pattern=r'^[6-9][0-9]{9}$')
