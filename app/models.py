@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -40,11 +40,20 @@ class Product(Base):
 	sku: Mapped[str] = mapped_column(String(100), nullable=False)
 	title: Mapped[str] = mapped_column(String(255), nullable=False)
 	description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+	eyebrow: Mapped[str] = mapped_column(String(120), nullable=False, default='')
 	image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+	currency: Mapped[str] = mapped_column(String(3), nullable=False, default='INR')
 	cost_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal('0.00'))
 	selling_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 	mrp: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 	stock_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+	stock_label: Mapped[str] = mapped_column(String(120), nullable=False, default='Available now')
+	gallery: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+	benefits: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+	features: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+	specifications: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+	package_contents: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+	faqs: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
 	is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 	created_at: Mapped[datetime] = mapped_column(
 		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

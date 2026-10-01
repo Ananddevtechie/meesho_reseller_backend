@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AddressExtractionRequest(BaseModel):
@@ -46,6 +46,63 @@ class CustomerSaveRequest(BaseModel):
 
 class CustomerSaveResponse(BaseModel):
 	customer_id: str
+
+
+class ProductCreateRequest(BaseModel):
+	model_config = ConfigDict(str_strip_whitespace=True)
+
+	slug: str = Field(min_length=1, max_length=100, pattern=r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+	sku: str = Field(min_length=1, max_length=100)
+	title: str = Field(min_length=1, max_length=255)
+	description: str = Field(min_length=1)
+	eyebrow: str = Field(default='', max_length=120)
+	image_url: str = Field(min_length=1)
+	currency: Literal['INR'] = 'INR'
+	cost_price: Decimal = Field(ge=0)
+	selling_price: Decimal = Field(gt=0)
+	mrp: Decimal = Field(gt=0)
+	stock_quantity: int = Field(ge=0)
+	stock_label: str = Field(min_length=1, max_length=120)
+	gallery: list[dict[str, str]] = Field(default_factory=list)
+	benefits: list[dict[str, str]] = Field(default_factory=list)
+	features: list[str] = Field(default_factory=list)
+	specifications: list[dict[str, str]] = Field(default_factory=list)
+	package_contents: list[str] = Field(default_factory=list)
+	faqs: list[dict[str, str]] = Field(default_factory=list)
+	is_active: bool = True
+
+	@model_validator(mode='after')
+	def validate_prices(self):
+		if self.mrp < self.selling_price:
+			raise ValueError('MRP must be greater than or equal to the selling price.')
+		return self
+
+
+class ProductPublic(BaseModel):
+	model_config = ConfigDict(from_attributes=True)
+
+	id: str
+	sku: str
+	title: str
+	description: Optional[str]
+	eyebrow: str
+	image_url: Optional[str]
+	currency: str
+	selling_price: Decimal
+	mrp: Decimal
+	stock_quantity: int
+	stock_label: str
+	gallery: list[dict[str, str]]
+	benefits: list[dict[str, str]]
+	features: list[str]
+	specifications: list[dict[str, str]]
+	package_contents: list[str]
+	faqs: list[dict[str, str]]
+
+
+class ProductAdmin(ProductPublic):
+	cost_price: Decimal
+	is_active: bool
 
 
 class CodOrderRequest(BaseModel):

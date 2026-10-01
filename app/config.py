@@ -13,10 +13,7 @@ class Settings(BaseSettings):
 	gemini_api_key: str = ''
 	gemini_model: str = 'gemini-2.0-flash'
 	database_url: str
-	cod_product_id: str = 'everyday-product'
-	cod_product_title: str = 'Premium Everyday Product'
-	cod_product_price: Decimal = Decimal('399.00')
-	cod_product_mrp: Decimal = Decimal('699.00')
+	admin_api_key: str = ''
 	cod_shipping_fee: Decimal = Decimal('0.00')
 	cod_tax_amount: Decimal = Decimal('0.00')
 	cod_fee: Decimal = Decimal('0.00')

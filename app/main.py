@@ -8,6 +8,7 @@ from app.schemas import AddressExtractionRequest, ExtractedAddress
 from app.routers.cod_email import router as cod_email_router
 from app.routers.customers import router as customers_router
 from app.routers.payments import router as payments_router
+from app.routers.products import router as products_router
 from app.services.ai_parser import GeminiExtractionError, extract_address
 
 
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(cod_email_router)
 app.include_router(customers_router)
 app.include_router(payments_router)
+app.include_router(products_router)
 
 
 @app.get('/health')

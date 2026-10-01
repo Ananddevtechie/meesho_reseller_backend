@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Customer, Order
+from app.models import Customer, Order, Product
 from app.schemas import (
 	CodOrderRequest,
 	PaidOrderResponse,
@@ -32,20 +32,20 @@ from app.services.razorpay import (
 router = APIRouter(prefix='/api/payments/razorpay', tags=['payments'])
 
 
-def _priced_total(request: CodOrderRequest) -> tuple[Decimal, Decimal, Decimal]:
-	if request.product_id != settings.cod_product_id:
+def _priced_total(request: CodOrderRequest, product: Product) -> tuple[Decimal, Decimal, Decimal]:
+	if not product.is_active:
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This product is no longer available.')
 	if (
-		settings.cod_product_price <= 0
-		or settings.cod_product_mrp < settings.cod_product_price
+		product.selling_price <= 0
+		or product.mrp < product.selling_price
 		or min(settings.cod_shipping_fee, settings.cod_tax_amount, settings.cod_fee) < 0
 	):
 		raise HTTPException(
 			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
 			detail='Store pricing is not configured correctly.',
 		)
-	subtotal = settings.cod_product_price * request.quantity
-	discount = (settings.cod_product_mrp - settings.cod_product_price) * request.quantity
+	subtotal = product.selling_price * request.quantity
+	discount = (product.mrp - product.selling_price) * request.quantity
 	total = subtotal + settings.cod_shipping_fee + settings.cod_tax_amount
 	return subtotal, discount, total
 
@@ -155,6 +155,9 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 			detail='Razorpay is not configured. Set the Razorpay test API keys in backend/.env.',
 		)
 	with SessionLocal() as session:
+		product = session.get(Product, request.product_id)
+		if not product or not product.is_active:
+			raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This product is no longer available.')
 		customer = session.get(Customer, request.customer_id) if request.customer_id else None
 		if not customer:
 			raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Save customer details before starting payment.')
@@ -171,7 +174,7 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 			'state': customer.state,
 			'pincode': customer.pincode,
 		}
-	subtotal, discount, total = _priced_total(request)
+	subtotal, discount, total = _priced_total(request, product)
 	amount = int((total * 100).to_integral_exact())
 	order_id = f"ORD-{uuid.uuid4().hex[:16].upper()}"
 	try:
@@ -185,11 +188,11 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		request_fingerprint=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
 		product_id=settings.cod_product_id,
 		customer_id=customer_details['id'],
-		product_sku=settings.cod_product_id,
-		product_title=settings.cod_product_title,
+		product_sku=product.sku,
+		product_title=product.title,
 		quantity=request.quantity,
-		unit_price=settings.cod_product_price,
-		mrp=settings.cod_product_mrp,
+		unit_price=product.selling_price,
+		mrp=product.mrp,
 		subtotal=subtotal,
 		discount=discount,
 		shipping=settings.cod_shipping_fee,
@@ -229,7 +232,7 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		checkout_config_id=settings.razorpay_checkout_config_id or '',
 		amount=amount,
 		currency='INR',
-		product_title=settings.cod_product_title,
+		product_title=product.title,
 		customer_name=customer_details['full_name'],
 		customer_mobile=customer_details['mobile'],
 		customer_email=customer_details['email'],

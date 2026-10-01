@@ -24,7 +24,14 @@ The migrations preserve existing order rows by renaming `customer_orders` to
 `shipments`, `expenses`, `profit_loss`, and `notifications`. New supporting
 tables start empty.
 
-The Razorpay payment flow writes payment orders to `orders`. The supporting
-tables are schema foundations; the API does not yet write separate customer,
-product, payment, shipment, expense, profit/loss, or notification records. The
-COD email flow sends order details by email but does not persist them.
+The Razorpay flow writes payment orders to `orders`, and catalog listings are
+stored in `products`. Customer details are stored separately in `customers`.
+The COD email flow sends order details by email but does not persist order rows;
+payment, shipment, expense, profit/loss, and notification tables remain unused.
+
+## Product catalog
+
+Set a long random `ADMIN_API_KEY` in the backend environment, then apply the
+migrations. Open `/admin/products` in the storefront and enter that key to add
+products. Public product pages read active listings from `/api/products`; admin
+catalog requests require the configured key. Keep the key out of source control.

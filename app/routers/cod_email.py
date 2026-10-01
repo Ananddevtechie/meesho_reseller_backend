@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status
 
 from app.config import settings
+from app.database import SessionLocal
+from app.models import Product
 from app.schemas import CodOrderRequest, CodOrderResponse
 from app.services.order_notifications import OrderNotificationError, send_cod_order_notification
 
@@ -16,14 +18,16 @@ router = APIRouter(prefix='/api/orders', tags=['orders'])
 def create_cod_order(
     request: CodOrderRequest,
 ) -> CodOrderResponse:
-    if request.product_id != settings.cod_product_id:
+    with SessionLocal() as session:
+        product = session.get(Product, request.product_id)
+    if not product or not product.is_active:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail='This product is no longer available.',
         )
     if (
-        settings.cod_product_price <= 0
-        or settings.cod_product_mrp < settings.cod_product_price
+        product.selling_price <= 0
+        or product.mrp < product.selling_price
         or min(settings.cod_shipping_fee, settings.cod_tax_amount, settings.cod_fee) < 0
     ):
         raise HTTPException(
@@ -31,19 +35,19 @@ def create_cod_order(
             detail='Store pricing is not configured correctly.',
         )
 
-    subtotal = settings.cod_product_price * request.quantity
-    discount = (settings.cod_product_mrp - settings.cod_product_price) * request.quantity
+    subtotal = product.selling_price * request.quantity
+    discount = (product.mrp - product.selling_price) * request.quantity
     total = subtotal + settings.cod_shipping_fee + settings.cod_tax_amount + settings.cod_fee
     now = datetime.now(timezone.utc)
     order_id = f"ORD-{uuid.uuid4().hex[:16].upper()}"
     order_payload = {
         'order_id': order_id,
-        'product_id': settings.cod_product_id,
-        'product_sku': settings.cod_product_id,
-        'product_title': settings.cod_product_title,
+        'product_id': product.id,
+        'product_sku': product.sku,
+        'product_title': product.title,
         'quantity': request.quantity,
-        'unit_price': settings.cod_product_price,
-        'mrp': settings.cod_product_mrp,
+        'unit_price': product.selling_price,
+        'mrp': product.mrp,
         'subtotal': subtotal,
         'discount': discount,
         'shipping': settings.cod_shipping_fee,
@@ -76,11 +80,11 @@ def create_cod_order(
         order_status='PLACED',
         payment_method='COD',
         payment_status='COD_PENDING',
-        product_title=settings.cod_product_title,
-        product_sku=settings.cod_product_id,
+        product_title=product.title,
+        product_sku=product.sku,
         quantity=request.quantity,
-        unit_price=settings.cod_product_price,
-        mrp=settings.cod_product_mrp,
+        unit_price=product.selling_price,
+        mrp=product.mrp,
         subtotal=subtotal,
         discount=discount,
         shipping=settings.cod_shipping_fee,
