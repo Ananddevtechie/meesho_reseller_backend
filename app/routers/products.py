@@ -1,4 +1,5 @@
 import hmac
+from base64 import b64decode
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -15,11 +16,22 @@ router = APIRouter(tags=['products'])
 
 
 def _require_admin(authorization: Optional[str]) -> None:
-	if not settings.admin_api_key:
-		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Admin access is not configured.')
-	provided_key = authorization.removeprefix('Bearer ').strip() if authorization else ''
-	if not hmac.compare_digest(provided_key, settings.admin_api_key):
-		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin access key is invalid.')
+	if not settings.admin_username or not settings.admin_password:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Admin username and password are not configured.')
+	scheme, separator, token = (authorization or '').partition(' ')
+	if not separator or scheme.lower() != 'basic':
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.')
+	try:
+		credentials = b64decode(token, validate=True).decode('utf-8')
+		username, separator, password = credentials.partition(':')
+	except (ValueError, UnicodeDecodeError) as error:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.') from error
+	if (
+		not separator
+		or not hmac.compare_digest(username.encode('utf-8'), settings.admin_username.encode('utf-8'))
+		or not hmac.compare_digest(password.encode('utf-8'), settings.admin_password.encode('utf-8'))
+	):
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.')
 
 
 @router.get('/api/products', response_model=list[ProductPublic])

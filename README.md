@@ -31,7 +31,8 @@ payment, shipment, expense, profit/loss, and notification tables remain unused.
 
 ## Product catalog
 
-Set a long random `ADMIN_API_KEY` in the backend environment, then apply the
-migrations. Open `/admin/products` in the storefront and enter that key to add
-products. Public product pages read active listings from `/api/products`; admin
-catalog requests require the configured key. Keep the key out of source control.
+Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the backend environment, then apply
+the migrations. Open `/admin/products` in the storefront and enter those
+credentials to add products. Public product pages read active listings from
+`/api/products`; admin catalog requests require HTTP Basic authentication. Keep
+the credentials out of source control and use a strong, unique password.

@@ -13,7 +13,8 @@ class Settings(BaseSettings):
 	gemini_api_key: str = ''
 	gemini_model: str = 'gemini-2.0-flash'
 	database_url: str
-	admin_api_key: str = ''
+	admin_username: str = ''
+	admin_password: str = ''
 	cod_shipping_fee: Decimal = Decimal('0.00')
 	cod_tax_amount: Decimal = Decimal('0.00')
 	cod_fee: Decimal = Decimal('0.00')
