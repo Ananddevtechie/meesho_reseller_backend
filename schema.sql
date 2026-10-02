@@ -35,6 +35,14 @@ CREATE TABLE products (
     CONSTRAINT uq_products_sku UNIQUE (sku)
 );
 
+CREATE TABLE admins (
+    id VARCHAR(36) PRIMARY KEY,
+    username VARCHAR(120) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uq_admins_username UNIQUE (username)
+);
+
 CREATE TABLE customers (
     id VARCHAR(141) PRIMARY KEY,
     full_name VARCHAR(120) NOT NULL,

@@ -6,18 +6,29 @@ from fastapi import APIRouter, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.config import settings
 from app.database import SessionLocal
-from app.models import Product
-from app.schemas import ProductAdmin, ProductCreateRequest, ProductPublic
+from app.models import Admin, Product
+from app.schemas import AdminLoginRequest, AdminLoginResponse, ProductAdmin, ProductCreateRequest, ProductPublic
+from app.services.admin_auth import verify_password
 
 
 router = APIRouter(tags=['products'])
+_DUMMY_PASSWORD_HASH = 'pbkdf2_sha256$600000$00000000000000000000000000000000$0000000000000000000000000000000000000000000000000000000000000000'
+
+
+def _admin_credentials_match(username: str, password: str) -> bool:
+	try:
+		with SessionLocal() as session:
+			admin = session.scalar(select(Admin).where(Admin.username == username))
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not verify admin credentials.') from error
+	if admin is None:
+		verify_password(password, _DUMMY_PASSWORD_HASH)
+		return False
+	return hmac.compare_digest(username.encode('utf-8'), admin.username.encode('utf-8')) and verify_password(password, admin.password_hash)
 
 
 def _require_admin(authorization: Optional[str]) -> None:
-	if not settings.admin_username or not settings.admin_password:
-		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Admin username and password are not configured.')
 	scheme, separator, token = (authorization or '').partition(' ')
 	if not separator or scheme.lower() != 'basic':
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.')
@@ -26,12 +37,15 @@ def _require_admin(authorization: Optional[str]) -> None:
 		username, separator, password = credentials.partition(':')
 	except (ValueError, UnicodeDecodeError) as error:
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.') from error
-	if (
-		not separator
-		or not hmac.compare_digest(username.encode('utf-8'), settings.admin_username.encode('utf-8'))
-		or not hmac.compare_digest(password.encode('utf-8'), settings.admin_password.encode('utf-8'))
-	):
+	if not separator or not _admin_credentials_match(username, password):
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.')
+
+
+@router.post('/api/admin/login', response_model=AdminLoginResponse)
+def admin_login(request: AdminLoginRequest) -> AdminLoginResponse:
+	if not _admin_credentials_match(request.username, request.password):
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Admin username or password is incorrect.')
+	return AdminLoginResponse()
 
 
 @router.get('/api/products', response_model=list[ProductPublic])
@@ -81,4 +95,29 @@ def create_product(
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A product with this slug or SKU already exists.') from error
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save this product.') from error
+	return product
+
+
+@router.put('/api/admin/products/{slug}', response_model=ProductAdmin)
+def update_product(
+	slug: str,
+	request: ProductCreateRequest,
+	authorization: Optional[str] = Header(default=None),
+) -> Product:
+	_require_admin(authorization)
+	if request.slug != slug:
+		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product slug cannot be changed.')
+	try:
+		with SessionLocal() as session:
+			product = session.scalar(select(Product).where(Product.id == slug))
+			if product is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+			for field, value in request.model_dump(exclude={'slug'}).items():
+				setattr(product, field, value)
+			session.commit()
+			session.refresh(product)
+	except IntegrityError as error:
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A product with this SKU already exists.') from error
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not update this product.') from error
 	return product

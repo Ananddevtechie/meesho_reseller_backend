@@ -66,6 +66,18 @@ class Product(Base):
 	)
 
 
+class Admin(Base):
+	__tablename__ = 'admins'
+	__table_args__ = (UniqueConstraint('username', name='uq_admins_username'),)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	username: Mapped[str] = mapped_column(String(120), nullable=False)
+	password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+
+
 class Customer(Base):
 	__tablename__ = 'customers'
 	__table_args__ = (UniqueConstraint('full_name', 'mobile', name='uq_customers_name_mobile'),)

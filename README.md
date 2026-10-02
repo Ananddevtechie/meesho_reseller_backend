@@ -21,8 +21,9 @@ uvicorn app.main:app --reload
 
 The migrations preserve existing order rows by renaming `customer_orders` to
 `orders`, then add `users`, `products`, `customers`, `order_items`, `payments`,
-`shipments`, `expenses`, `profit_loss`, and `notifications`. New supporting
-tables start empty.
+`shipments`, `expenses`, `profit_loss`, and `notifications`. Revision 0007
+renames the sample `backup` table to `admins` and seeds the configured admin
+account with a salted password hash.
 
 The Razorpay flow writes payment orders to `orders`, and catalog listings are
 stored in `products`. Customer details are stored separately in `customers`.
@@ -33,6 +34,8 @@ payment, shipment, expense, profit/loss, and notification tables remain unused.
 
 Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the backend environment, then apply
 the migrations. Open `/admin/products` in the storefront and enter those
-credentials to add products. Public product pages read active listings from
-`/api/products`; admin catalog requests require HTTP Basic authentication. Keep
-the credentials out of source control and use a strong, unique password.
+credentials to add products. Login is verified against the `admins` table by
+`POST /api/admin/login`, which returns HTTP 200 on success; the raw password is
+not stored in the database. Public product pages read active listings from
+`/api/products`, while admin catalog requests verify the same credentials.
+Keep the credentials out of source control and use a strong, unique password.
