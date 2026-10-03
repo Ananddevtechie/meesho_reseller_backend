@@ -2,12 +2,12 @@ import hmac
 from base64 import b64decode
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Header, HTTPException, Response, status
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.database import SessionLocal
-from app.models import Admin, Product
+from app.models import Admin, OrderItem, Product
 from app.schemas import AdminLoginRequest, AdminLoginResponse, ProductAdmin, ProductCreateRequest, ProductPublic
 from app.services.admin_auth import verify_password
 
@@ -121,3 +121,19 @@ def update_product(
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not update this product.') from error
 	return product
+
+
+@router.delete('/api/admin/products/{slug}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(slug: str, authorization: Optional[str] = Header(default=None)) -> Response:
+	_require_admin(authorization)
+	try:
+		with SessionLocal() as session:
+			product = session.get(Product, slug)
+			if product is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+			session.execute(update(OrderItem).where(OrderItem.product_id == slug).values(product_id=None))
+			session.delete(product)
+			session.commit()
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not delete this product.') from error
+	return Response(status_code=status.HTTP_204_NO_CONTENT)
