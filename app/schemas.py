@@ -63,6 +63,7 @@ class ProductCreateRequest(BaseModel):
 	slug: str = Field(min_length=1, max_length=100, pattern=r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 	sku: str = Field(min_length=1, max_length=100)
 	title: str = Field(min_length=1, max_length=255)
+	category: str = Field(min_length=1, max_length=80)
 	description: str = Field(min_length=1)
 	eyebrow: str = Field(default='', max_length=120)
 	image_url: str = Field(min_length=1)
@@ -93,6 +94,7 @@ class ProductPublic(BaseModel):
 	id: str
 	sku: str
 	title: str
+	category: str
 	description: Optional[str]
 	eyebrow: str
 	image_url: Optional[str]

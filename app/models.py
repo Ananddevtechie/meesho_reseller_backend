@@ -39,6 +39,7 @@ class Product(Base):
 	id: Mapped[str] = mapped_column(String(100), primary_key=True)
 	sku: Mapped[str] = mapped_column(String(100), nullable=False)
 	title: Mapped[str] = mapped_column(String(255), nullable=False)
+	category: Mapped[str] = mapped_column(String(80), nullable=False, default='Other')
 	description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	eyebrow: Mapped[str] = mapped_column(String(120), nullable=False, default='')
 	image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

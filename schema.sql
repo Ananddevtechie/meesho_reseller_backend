@@ -14,6 +14,7 @@ CREATE TABLE products (
     id VARCHAR(100) PRIMARY KEY,
     sku VARCHAR(100) NOT NULL,
     title VARCHAR(255) NOT NULL,
+    category VARCHAR(80) NOT NULL DEFAULT 'Other',
     description TEXT,
     eyebrow VARCHAR(120) NOT NULL DEFAULT '',
     image_url TEXT,
