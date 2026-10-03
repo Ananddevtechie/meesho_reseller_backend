@@ -1,10 +1,15 @@
+import logging
 import smtplib
 import ssl
+import time
 from html import escape
 from email.message import EmailMessage
 from typing import Any
 
 from app.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class OrderNotificationError(RuntimeError):
@@ -129,26 +134,40 @@ def send_order_notification(order: dict[str, Any]) -> None:
     )
     message.add_alternative(_html_email(order), subtype='html')
 
-    try:
-        if settings.smtp_use_ssl:
-            with smtplib.SMTP_SSL(
-                settings.smtp_host,
-                settings.smtp_port,
-                timeout=15,
-                context=ssl.create_default_context(),
-            ) as server:
+    for attempt in range(3):
+        try:
+            if settings.smtp_use_ssl:
+                with smtplib.SMTP_SSL(
+                    settings.smtp_host,
+                    settings.smtp_port,
+                    timeout=15,
+                    context=ssl.create_default_context(),
+                ) as server:
+                    server.login(settings.smtp_username, settings.smtp_password)
+                    server.send_message(message)
+                return
+
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
+                if settings.smtp_starttls:
+                    server.starttls(context=ssl.create_default_context())
+                    server.ehlo()
                 server.login(settings.smtp_username, settings.smtp_password)
                 server.send_message(message)
             return
-
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
-            if settings.smtp_starttls:
-                server.starttls(context=ssl.create_default_context())
-                server.ehlo()
-            server.login(settings.smtp_username, settings.smtp_password)
-            server.send_message(message)
-    except (OSError, smtplib.SMTPException) as error:
-        raise OrderNotificationError('The order email could not be sent.') from error
+        except (OSError, smtplib.SMTPException) as error:
+            smtp_code = error.smtp_code if isinstance(error, smtplib.SMTPResponseException) else None
+            logger.warning(
+                'Order email attempt %s/3 failed for order %s (%s, SMTP code %s).',
+                attempt + 1,
+                order['order_id'],
+                type(error).__name__,
+                smtp_code or 'unavailable',
+            )
+            if isinstance(error, smtplib.SMTPResponseException) and error.smtp_code >= 500:
+                break
+            if attempt < 2:
+                time.sleep(0.5 * (2 ** attempt))
+    raise OrderNotificationError('The order email could not be sent.') from error
 
 
 def send_cod_order_notification(order: dict[str, Any]) -> None:

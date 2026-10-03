@@ -25,10 +25,15 @@ The migrations preserve existing order rows by renaming `customer_orders` to
 renames the sample `backup` table to `admins` and seeds the configured admin
 account with a salted password hash.
 
-The Razorpay flow writes payment orders to `orders`, and catalog listings are
+The Razorpay and COD flows write orders to `orders`, and catalog listings are
 stored in `products`. Customer details are stored separately in `customers`.
-The COD email flow sends order details by email but does not persist order rows;
-payment, shipment, expense, profit/loss, and notification tables remain unused.
+COD orders are committed before email delivery, and the client supplies an
+`Idempotency-Key` so retries cannot create duplicate orders. Email status,
+attempt count, and the last delivery error are stored on the order. SMTP retries
+transient failures up to three times. A failed order email can be retried by an
+admin with Basic authentication using `POST
+/api/admin/orders/{order_id}/retry-email`. Payment, shipment, expense, and
+profit/loss tables remain unused.
 
 ## Product catalog
 

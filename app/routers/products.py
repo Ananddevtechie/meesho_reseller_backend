@@ -7,9 +7,10 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.database import SessionLocal
-from app.models import Admin, OrderItem, Product
+from app.models import Admin, Order, OrderItem, Product
 from app.schemas import AdminLoginRequest, AdminLoginResponse, ProductAdmin, ProductCreateRequest, ProductPublic
 from app.services.admin_auth import verify_password
+from app.services.order_email_delivery import deliver_order_email
 
 
 router = APIRouter(tags=['products'])
@@ -137,3 +138,28 @@ def delete_product(slug: str, authorization: Optional[str] = Header(default=None
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not delete this product.') from error
 	return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post('/api/admin/orders/{order_id}/retry-email', status_code=status.HTTP_202_ACCEPTED)
+def retry_order_email(
+	order_id: str,
+	authorization: Optional[str] = Header(default=None),
+) -> dict[str, str]:
+	_require_admin(authorization)
+	with SessionLocal() as session:
+		order = session.get(Order, order_id)
+	if order is None:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
+	if order.email_status == 'SENT':
+		return {'email_status': 'SENT', 'message': 'Order email was already sent.'}
+	if order.email_status == 'SENDING':
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This order email is already being sent.')
+	if order.order_status != 'PLACED':
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Only placed orders can have their email retried.')
+	deliver_order_email(order_id)
+	with SessionLocal() as session:
+		order = session.get(Order, order_id)
+	if order is None:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
+	message = 'Order email sent.' if order.email_status == 'SENT' else 'Order email could not be sent; check backend logs.'
+	return {'email_status': order.email_status, 'message': message}
