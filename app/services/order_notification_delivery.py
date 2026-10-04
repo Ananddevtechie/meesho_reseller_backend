@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +23,10 @@ def is_stale_notification(order: Order) -> bool:
 
 
 def _notification_payload(order: Order) -> dict[str, Any]:
+    order_date = order.created_at
+    if order_date.tzinfo is None:
+        order_date = order_date.replace(tzinfo=timezone.utc)
+    order_date = order_date.astimezone(ZoneInfo('Asia/Kolkata'))
     return {
         'order_id': order.id,
         'product_sku': order.product_sku,
@@ -46,7 +51,7 @@ def _notification_payload(order: Order) -> dict[str, Any]:
         'pin': order.pincode,
         'city': order.city,
         'state': order.state,
-        'order_date': order.created_at.strftime('%Y-%m-%d %I:%M %p UTC').replace(' 0', ' ', 1),
+        'order_date': order_date.strftime('%Y-%m-%d %I:%M %p IST').replace(' 0', ' ', 1),
         'expected_delivery_range': order.expected_delivery_range,
     }
 
