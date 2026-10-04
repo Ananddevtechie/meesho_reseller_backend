@@ -32,9 +32,12 @@ COD orders are committed before Telegram notification delivery, and the client s
 attempt count, and the last delivery error are stored on the order. Telegram retries
 transient failures up to three times. A failed order notification can be retried by an
 admin with Basic authentication using `POST
-/api/admin/orders/{order_id}/retry-notification`. Set `TELEGRAM_BOT_TOKEN` and
-`TELEGRAM_CHAT_ID` in `backend/.env`, then send `/start` to the bot from the target chat.
-Apply the migrations to rename the existing notification status fields. Payment, shipment, expense, and
+/api/admin/orders/{order_id}/retry-notification`. For local development, set
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `backend/.env`. For the deployed
+storefront, set them in the backend host's environment (Render), not in Vercel's
+frontend settings or only in the local `.env`. Send `/start` to the bot from the
+target chat. Apply the migrations to rename the existing notification status fields.
+Payment, shipment, expense, and
 profit/loss tables remain unused.
 
 ## Product catalog

@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from app.config import settings
+from app.config import Settings
 
 
 logger = logging.getLogger(__name__)
@@ -18,17 +18,16 @@ def _money(amount: Any) -> str:
     return f'INR {amount:,.2f}'
 
 
-def _address(order: dict[str, Any]) -> str:
-    return ', '.join(
-        part.strip()
-        for part in (
-            order['address_line1'],
-            order['address_line2'],
-            f"Landmark: {order['landmark']}" if order.get('landmark') else '',
-            f"{order['city']}, {order['state']} {order['pin']}",
-        )
-        if part and part.strip()
+def _address_lines(order: dict[str, Any]) -> list[str]:
+    fields = (
+        ('House / Street', order.get('address_line1')),
+        ('Address line 2', order.get('address_line2')),
+        ('Landmark', order.get('landmark')),
+        ('City', order.get('city')),
+        ('State', order.get('state')),
+        ('PIN / ZIP', order.get('pin')),
     )
+    return [f'{label}: {value.strip()}' for label, value in fields if value and value.strip()]
 
 
 def _message(order: dict[str, Any]) -> str:
@@ -43,7 +42,9 @@ def _message(order: dict[str, Any]) -> str:
             f"Phone: +91 {order['mobile']}",
             f"Alternate phone: {order.get('alternate_mobile') or 'Not provided'}",
             f"Email: {order.get('customer_email') or 'Not provided'}",
-            f"Address: {_address(order)}",
+            '',
+            'DELIVERY ADDRESS',
+            *_address_lines(order),
             '',
             'PRODUCT',
             f"{order['product_title']} (SKU: {order['product_sku']})",
@@ -66,22 +67,24 @@ def _message(order: dict[str, Any]) -> str:
 
 
 def send_order_notification(order: dict[str, Any]) -> None:
+    telegram_settings = Settings()
     missing_settings = [
         name
         for name, value in (
-            ('TELEGRAM_BOT_TOKEN', settings.telegram_bot_token),
-            ('TELEGRAM_CHAT_ID', settings.telegram_chat_id),
+            ('TELEGRAM_BOT_TOKEN', telegram_settings.telegram_bot_token),
+            ('TELEGRAM_CHAT_ID', telegram_settings.telegram_chat_id),
         )
         if not value
     ]
     if missing_settings:
         missing = ', '.join(missing_settings)
         raise TelegramNotificationError(
-            f'Order notifications are not configured. Set {missing} in backend/.env, then restart the backend.'
+            f'Order notifications are not configured. Set {missing} in the backend runtime environment '
+            '(backend/.env for local development; Render service environment for production).'
         )
 
-    url = f'https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage'
-    payload = {'chat_id': settings.telegram_chat_id, 'text': _message(order)}
+    url = f'https://api.telegram.org/bot{telegram_settings.telegram_bot_token}/sendMessage'
+    payload = {'chat_id': telegram_settings.telegram_chat_id, 'text': _message(order)}
     for attempt in range(3):
         try:
             response = httpx.post(url, json=payload, timeout=15)
