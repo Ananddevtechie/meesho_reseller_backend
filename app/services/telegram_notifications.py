@@ -56,6 +56,7 @@ def _message(order: dict[str, Any]) -> str:
             'PRODUCT',
             f"{order['product_title']} (SKU: {order['product_sku']})",
             f"Quantity: {order['quantity']}",
+            *([f"Product link: {order['meesho_url']}"] if order.get('meesho_url') else []),
             '',
             'PAYMENT',
             f'Method: {payment_method}',

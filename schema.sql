@@ -18,6 +18,7 @@ CREATE TABLE products (
     description TEXT,
     eyebrow VARCHAR(120) NOT NULL DEFAULT '',
     image_url TEXT,
+    meesho_url TEXT,
     currency VARCHAR(3) NOT NULL DEFAULT 'INR',
     cost_price NUMERIC(12, 2) NOT NULL,
     selling_price NUMERIC(12, 2) NOT NULL,

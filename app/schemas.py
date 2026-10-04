@@ -67,6 +67,7 @@ class ProductCreateRequest(BaseModel):
 	description: str = Field(min_length=1)
 	eyebrow: str = Field(default='', max_length=120)
 	image_url: str = Field(min_length=1)
+	meesho_url: Optional[str] = Field(default=None, max_length=2048)
 	currency: Literal['INR'] = 'INR'
 	cost_price: Decimal = Field(ge=0)
 	selling_price: Decimal = Field(gt=0)
@@ -86,6 +87,17 @@ class ProductCreateRequest(BaseModel):
 		if self.mrp < self.selling_price:
 			raise ValueError('MRP must be greater than or equal to the selling price.')
 		return self
+
+	@field_validator('meesho_url', mode='before')
+	@classmethod
+	def validate_meesho_url(cls, value: Optional[str]) -> Optional[str]:
+		if isinstance(value, str):
+			value = value.strip()
+			if not value:
+				return None
+			if not value.lower().startswith('https://'):
+				raise ValueError('Meesho product link must use https://.')
+		return value
 
 
 class ProductPublic(BaseModel):
@@ -114,6 +126,7 @@ class ProductPublic(BaseModel):
 class ProductAdmin(ProductPublic):
 	cost_price: Decimal
 	is_active: bool
+	meesho_url: Optional[str]
 
 
 class CodOrderRequest(BaseModel):

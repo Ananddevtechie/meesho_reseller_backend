@@ -1,13 +1,13 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
-from app.models import Order
+from app.models import Order, Product
 from app.services.telegram_notifications import TelegramNotificationError, send_order_notification
 
 
@@ -22,7 +22,7 @@ def is_stale_notification(order: Order) -> bool:
     )
 
 
-def _notification_payload(order: Order) -> dict[str, Any]:
+def _notification_payload(order: Order, meesho_url: Optional[str] = None) -> dict[str, Any]:
     order_date = order.created_at
     if order_date.tzinfo is None:
         order_date = order_date.replace(tzinfo=timezone.utc)
@@ -31,6 +31,7 @@ def _notification_payload(order: Order) -> dict[str, Any]:
         'order_id': order.id,
         'product_sku': order.product_sku,
         'product_title': order.product_title,
+        'meesho_url': meesho_url,
         'quantity': order.quantity,
         'mrp': order.mrp,
         'discount': order.discount,
@@ -85,7 +86,8 @@ def deliver_order_notification(order_id: str) -> None:
             order = session.get(Order, order_id)
             if order is None:
                 return
-            payload = _notification_payload(order)
+            product = session.get(Product, order.product_id)
+            payload = _notification_payload(order, product.meesho_url if product else None)
     except SQLAlchemyError:
         logger.exception('Could not claim Telegram notification for order %s.', order_id)
         return

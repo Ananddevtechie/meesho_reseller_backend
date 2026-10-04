@@ -43,6 +43,7 @@ class Product(Base):
 	description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	eyebrow: Mapped[str] = mapped_column(String(120), nullable=False, default='')
 	image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+	meesho_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	currency: Mapped[str] = mapped_column(String(3), nullable=False, default='INR')
 	cost_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal('0.00'))
 	selling_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
