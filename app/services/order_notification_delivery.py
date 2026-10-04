@@ -46,7 +46,7 @@ def _notification_payload(order: Order) -> dict[str, Any]:
         'pin': order.pincode,
         'city': order.city,
         'state': order.state,
-        'order_date': order.created_at.strftime('%Y-%m-%d %H:%M UTC'),
+        'order_date': order.created_at.strftime('%Y-%m-%d %I:%M %p UTC').replace(' 0', ' ', 1),
         'expected_delivery_range': order.expected_delivery_range,
     }
 

@@ -31,11 +31,18 @@ def _address_lines(order: dict[str, Any]) -> list[str]:
 
 
 def _message(order: dict[str, Any]) -> str:
-    fee_lines = [f"COD fee: {_money(order['cod_fee'])}"] if order['payment_method'] == 'COD' else []
+    payment_method = 'COD' if order['payment_method'] == 'COD' else 'Online payment'
+    payment_status = {
+        'COD_PENDING': 'COD Pending',
+        'PAID': 'Paid',
+        'PAYMENT_PENDING': 'Payment Pending',
+        'PAYMENT_FAILED': 'Payment Failed',
+    }.get(order['payment_status'], order['payment_status'].replace('_', ' ').title())
     return '\n'.join(
         (
-            'NEW THECART ORDER',
+            'NEW THECART ORDER 🛍️',
             f"Order: {order['order_id']}",
+            '------------------------------',
             '',
             'CUSTOMER',
             f"Name: {order['full_name']}",
@@ -51,14 +58,10 @@ def _message(order: dict[str, Any]) -> str:
             f"Quantity: {order['quantity']}",
             '',
             'PAYMENT',
-            f"Method: {order['payment_method']} ({order['payment_status']})",
-            f"MRP: {_money(order['mrp'])}",
-            f"Discount: -{_money(order['discount'])}",
-            f"Shipping: {_money(order['shipping'])}",
-            f"Tax: {_money(order['tax'])}",
-            *fee_lines,
+            f'Method: {payment_method}',
+            f'State: {payment_status}',
             f"Total: {_money(order['total'])}",
-            f"Payment reference: {order.get('payment_reference') or 'Not applicable'}",
+            '------------------------------',
             '',
             f"Order date: {order['order_date']}",
             f"Expected delivery: {order['expected_delivery_range']}",
