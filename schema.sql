@@ -45,6 +45,22 @@ CREATE TABLE admins (
     CONSTRAINT uq_admins_username UNIQUE (username)
 );
 
+CREATE TABLE product_reviews (
+    id VARCHAR(36) PRIMARY KEY,
+    product_id VARCHAR(100) NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    reviewer_name VARCHAR(120) NOT NULL,
+    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE product_review_images (
+    id VARCHAR(36) PRIMARY KEY,
+    review_id VARCHAR(36) NOT NULL REFERENCES product_reviews(id) ON DELETE CASCADE,
+    content_type VARCHAR(40) NOT NULL,
+    image_data BYTEA NOT NULL
+);
+
 CREATE TABLE customers (
     id VARCHAR(141) PRIMARY KEY,
     full_name VARCHAR(120) NOT NULL,

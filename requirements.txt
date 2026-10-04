@@ -10,3 +10,4 @@ httpx
 beautifulsoup4
 playwright
 python-dotenv
+python-multipart

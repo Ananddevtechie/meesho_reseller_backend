@@ -129,6 +129,21 @@ class ProductAdmin(ProductPublic):
 	meesho_url: Optional[str]
 
 
+class ProductReviewItem(BaseModel):
+	id: str
+	reviewer_name: str
+	rating: int
+	comment: str
+	created_at: datetime
+	image_urls: list[str]
+
+
+class ProductReviewSummary(BaseModel):
+	average_rating: float
+	review_count: int
+	reviews: list[ProductReviewItem]
+
+
 class CodOrderRequest(BaseModel):
 	product_id: str = Field(min_length=1, max_length=100)
 	quantity: int = Field(ge=1, le=10)

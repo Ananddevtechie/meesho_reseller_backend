@@ -1,20 +1,68 @@
 import hmac
+import uuid
 from base64 import b64decode
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, status
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.database import SessionLocal
-from app.models import Admin, Order, OrderItem, Product
-from app.schemas import AdminLoginRequest, AdminLoginResponse, ProductAdmin, ProductCreateRequest, ProductPublic
+from app.models import Admin, Order, OrderItem, Product, ProductReview, ProductReviewImage
+from app.schemas import (
+	AdminLoginRequest,
+	AdminLoginResponse,
+	ProductAdmin,
+	ProductCreateRequest,
+	ProductPublic,
+	ProductReviewItem,
+	ProductReviewSummary,
+)
 from app.services.admin_auth import verify_password
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 
 
 router = APIRouter(tags=['products'])
 _DUMMY_PASSWORD_HASH = 'pbkdf2_sha256$600000$00000000000000000000000000000000$0000000000000000000000000000000000000000000000000000000000000000'
+_MAX_REVIEW_IMAGES = 5
+_MAX_REVIEW_IMAGE_BYTES = 5 * 1024 * 1024
+_REVIEW_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+
+
+def _review_summary(session, slug: str) -> ProductReviewSummary:
+	reviews = list(session.scalars(
+		select(ProductReview).where(ProductReview.product_id == slug).order_by(ProductReview.created_at.desc())
+	))
+	images_by_review: dict[str, list[str]] = {review.id: [] for review in reviews}
+	if reviews:
+		images = session.scalars(
+			select(ProductReviewImage).where(ProductReviewImage.review_id.in_([review.id for review in reviews]))
+		)
+		for image in images:
+			images_by_review[image.review_id].append(
+				f'/api/products/{slug}/reviews/{image.review_id}/images/{image.id}'
+			)
+	items = [
+		ProductReviewItem(
+			id=review.id,
+			reviewer_name=review.reviewer_name,
+			rating=review.rating,
+			comment=review.comment,
+			created_at=review.created_at,
+			image_urls=images_by_review[review.id],
+		)
+		for review in reviews
+	]
+	average_rating = round(sum(review.rating for review in reviews) / len(reviews), 1) if reviews else 0.0
+	return ProductReviewSummary(average_rating=average_rating, review_count=len(reviews), reviews=items)
+
+
+def _valid_review_image(content_type: str, data: bytes) -> bool:
+	if content_type == 'image/jpeg':
+		return data.startswith(b'\xff\xd8\xff')
+	if content_type == 'image/png':
+		return data.startswith(b'\x89PNG\r\n\x1a\n')
+	return content_type == 'image/webp' and data.startswith(b'RIFF') and data[8:12] == b'WEBP'
 
 
 def _admin_credentials_match(username: str, password: str) -> bool:
@@ -68,6 +116,110 @@ def get_product(slug: str) -> Product:
 	if product is None:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
 	return product
+
+
+@router.get('/api/products/{slug}/reviews', response_model=ProductReviewSummary)
+def get_product_reviews(slug: str) -> ProductReviewSummary:
+	try:
+		with SessionLocal() as session:
+			product = session.scalar(select(Product).where(Product.id == slug, Product.is_active.is_(True)))
+			if product is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+			return _review_summary(session, slug)
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load product reviews.') from error
+
+
+@router.get('/api/products/{slug}/reviews/{review_id}/images/{image_id}')
+def get_product_review_image(slug: str, review_id: str, image_id: str) -> Response:
+	try:
+		with SessionLocal() as session:
+			image = session.scalar(
+				select(ProductReviewImage)
+				.join(ProductReview, ProductReview.id == ProductReviewImage.review_id)
+				.join(Product, Product.id == ProductReview.product_id)
+				.where(
+					Product.id == slug,
+					Product.is_active.is_(True),
+					ProductReview.id == review_id,
+					ProductReviewImage.id == image_id,
+				)
+			)
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load review image.') from error
+	if image is None:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Review image not found.')
+	return Response(content=image.image_data, media_type=image.content_type, headers={'Cache-Control': 'public, max-age=86400'})
+
+
+@router.get('/api/admin/products/{slug}/reviews', response_model=ProductReviewSummary)
+def list_admin_product_reviews(
+	slug: str,
+	authorization: Optional[str] = Header(default=None),
+) -> ProductReviewSummary:
+	_require_admin(authorization)
+	try:
+		with SessionLocal() as session:
+			if session.get(Product, slug) is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+			return _review_summary(session, slug)
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load product reviews.') from error
+
+
+@router.post('/api/admin/products/{slug}/reviews', response_model=ProductReviewItem, status_code=status.HTTP_201_CREATED)
+async def create_product_review(
+	slug: str,
+	rating: int = Form(..., ge=1, le=5),
+	comment: str = Form(..., min_length=1, max_length=2000),
+	reviewer_name: str = Form(default='Verified customer', min_length=1, max_length=120),
+	images: list[UploadFile] = File(default=[]),
+	authorization: Optional[str] = Header(default=None),
+) -> ProductReviewItem:
+	_require_admin(authorization)
+	if len(images) > _MAX_REVIEW_IMAGES:
+		raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Upload no more than five review images.')
+	comment = comment.strip()
+	reviewer_name = reviewer_name.strip()
+	if not comment or not reviewer_name:
+		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Reviewer name and comment cannot be blank.')
+	image_data: list[tuple[str, bytes]] = []
+	for image in images:
+		content_type = (image.content_type or '').lower()
+		if content_type not in _REVIEW_IMAGE_TYPES:
+			raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail='Review images must be JPEG, PNG, or WebP.')
+		data = await image.read(_MAX_REVIEW_IMAGE_BYTES + 1)
+		await image.close()
+		if len(data) > _MAX_REVIEW_IMAGE_BYTES:
+			raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Each review image must be 5 MB or smaller.')
+		if not _valid_review_image(content_type, data):
+			raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail='The uploaded file is not a valid image.')
+		image_data.append((content_type, data))
+	try:
+		with SessionLocal() as session:
+			if session.get(Product, slug) is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+			review = ProductReview(
+				id=uuid.uuid4().hex,
+				product_id=slug,
+				reviewer_name=reviewer_name,
+				rating=rating,
+				comment=comment,
+			)
+			session.add(review)
+			session.flush()
+			for content_type, data in image_data:
+				session.add(ProductReviewImage(
+					id=uuid.uuid4().hex,
+					review_id=review.id,
+					content_type=content_type,
+					image_data=data,
+				))
+			session.commit()
+			session.refresh(review)
+			return _review_summary(session, slug).reviews[0]
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save the product review.') from error
 
 
 @router.get('/api/admin/products', response_model=list[ProductAdmin])

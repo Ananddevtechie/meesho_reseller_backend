@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -66,6 +66,29 @@ class Product(Base):
 		onupdate=lambda: datetime.now(timezone.utc),
 		nullable=False,
 	)
+
+
+class ProductReview(Base):
+	__tablename__ = 'product_reviews'
+	__table_args__ = (CheckConstraint('rating >= 1 AND rating <= 5', name='ck_product_reviews_rating_range'),)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	product_id: Mapped[str] = mapped_column(ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
+	reviewer_name: Mapped[str] = mapped_column(String(120), nullable=False)
+	rating: Mapped[int] = mapped_column(Integer, nullable=False)
+	comment: Mapped[str] = mapped_column(Text, nullable=False)
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+
+
+class ProductReviewImage(Base):
+	__tablename__ = 'product_review_images'
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	review_id: Mapped[str] = mapped_column(ForeignKey('product_reviews.id', ondelete='CASCADE'), nullable=False)
+	content_type: Mapped[str] = mapped_column(String(40), nullable=False)
+	image_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
 
 class Admin(Base):
