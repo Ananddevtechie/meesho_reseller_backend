@@ -1,7 +1,8 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import and_, or_, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
@@ -10,6 +11,14 @@ from app.services.telegram_notifications import TelegramNotificationError, send_
 
 
 logger = logging.getLogger(__name__)
+STALE_NOTIFICATION_AFTER = timedelta(minutes=5)
+
+
+def is_stale_notification(order: Order) -> bool:
+    return (
+        order.notification_status == 'SENDING'
+        and order.updated_at < datetime.now(timezone.utc) - STALE_NOTIFICATION_AFTER
+    )
 
 
 def _notification_payload(order: Order) -> dict[str, Any]:
@@ -45,13 +54,24 @@ def _notification_payload(order: Order) -> dict[str, Any]:
 def deliver_order_notification(order_id: str) -> None:
     try:
         with SessionLocal() as session:
+            stale_before = datetime.now(timezone.utc) - STALE_NOTIFICATION_AFTER
             claim = session.execute(
                 update(Order)
-                .where(Order.id == order_id, Order.notification_status.in_(('PENDING', 'FAILED')))
+                .where(
+                    Order.id == order_id,
+                    or_(
+                        Order.notification_status.in_(('PENDING', 'FAILED')),
+                        and_(
+                            Order.notification_status == 'SENDING',
+                            Order.updated_at < stale_before,
+                        ),
+                    ),
+                )
                 .values(
                     notification_status='SENDING',
                     notification_attempts=Order.notification_attempts + 1,
                     notification_error=None,
+                    updated_at=datetime.now(timezone.utc),
                 )
             )
             session.commit()

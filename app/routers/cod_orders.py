@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Order, Product
 from app.schemas import CodOrderRequest, CodOrderResponse
-from app.services.order_notification_delivery import deliver_order_notification
+from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 
 
 router = APIRouter(prefix='/api/orders', tags=['orders'])
@@ -130,7 +130,7 @@ def create_cod_order(
     except SQLAlchemyError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save the COD order.') from error
 
-    if order.notification_status in {'PENDING', 'FAILED'}:
+    if order.notification_status in {'PENDING', 'FAILED'} or is_stale_notification(order):
         deliver_order_notification(order.id)
         try:
             with SessionLocal() as session:

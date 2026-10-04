@@ -18,7 +18,7 @@ from app.schemas import (
 	RazorpayOrderResponse,
 	RazorpayVerificationRequest,
 )
-from app.services.order_notification_delivery import deliver_order_notification
+from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 from app.services.razorpay import (
 	RazorpayError,
 	create_order as create_razorpay_order,
@@ -230,7 +230,7 @@ def _confirm_order(order_id: str, provider_order_id: str, payment_id: str, payme
 		order = session.get(Order, order_id)
 		if not order:
 			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order was not found.')
-		should_notify = order.notification_status in {'PENDING', 'FAILED'}
+		should_notify = order.notification_status in {'PENDING', 'FAILED'} or is_stale_notification(order)
 	if should_notify:
 		deliver_order_notification(order.id)
 	with SessionLocal() as session:

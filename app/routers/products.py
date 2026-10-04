@@ -10,7 +10,7 @@ from app.database import SessionLocal
 from app.models import Admin, Order, OrderItem, Product
 from app.schemas import AdminLoginRequest, AdminLoginResponse, ProductAdmin, ProductCreateRequest, ProductPublic
 from app.services.admin_auth import verify_password
-from app.services.order_notification_delivery import deliver_order_notification
+from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 
 
 router = APIRouter(tags=['products'])
@@ -152,7 +152,7 @@ def retry_order_notification(
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
 	if order.notification_status == 'SENT':
 		return {'notification_status': 'SENT', 'message': 'Order notification was already sent.'}
-	if order.notification_status == 'SENDING':
+	if order.notification_status == 'SENDING' and not is_stale_notification(order):
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This order notification is already being sent.')
 	if order.order_status != 'PLACED':
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Only placed orders can have their notification retried.')
