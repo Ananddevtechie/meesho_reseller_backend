@@ -142,9 +142,9 @@ class Order(Base):
 	state: Mapped[str] = mapped_column(String(100), nullable=False)
 	pincode: Mapped[str] = mapped_column(String(6), nullable=False)
 	expected_delivery_range: Mapped[str] = mapped_column(String(120), nullable=False)
-	email_status: Mapped[str] = mapped_column(String(20), nullable=False, default='PENDING')
-	email_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-	email_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+	notification_status: Mapped[str] = mapped_column(String(20), nullable=False, default='PENDING')
+	notification_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+	notification_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 	whatsapp_status: Mapped[str] = mapped_column(String(30), nullable=False, default='NOT_OPTED_IN')
 	created_at: Mapped[datetime] = mapped_column(

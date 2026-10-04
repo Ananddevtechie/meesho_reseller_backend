@@ -23,14 +23,8 @@ class Settings(BaseSettings):
 	razorpay_key_secret: str = ''
 	razorpay_checkout_config_id: str = ''
 	razorpay_webhook_secret: str = ''
-	order_notification_email: str = 'dropshipprodanand@gmail.com'
-	smtp_host: str = ''
-	smtp_port: int = 587
-	smtp_username: str = ''
-	smtp_password: str = ''
-	smtp_from_email: str = ''
-	smtp_use_ssl: bool = False
-	smtp_starttls: bool = True
+	telegram_bot_token: str = ''
+	telegram_chat_id: str = ''
 
 	@field_validator('*', mode='before')
 	@classmethod

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import check_database_connection
 from app.schemas import AddressExtractionRequest, ExtractedAddress
-from app.routers.cod_email import router as cod_email_router
+from app.routers.cod_orders import router as cod_orders_router
 from app.routers.customers import router as customers_router
 from app.routers.payments import router as payments_router
 from app.routers.products import router as products_router
@@ -25,10 +25,15 @@ app.add_middleware(
 	allow_methods=['*'],
 	allow_headers=['*'],
 )
-app.include_router(cod_email_router)
+app.include_router(cod_orders_router)
 app.include_router(customers_router)
 app.include_router(payments_router)
 app.include_router(products_router)
+
+
+@app.get('/')
+async def root() -> dict[str, str]:
+	return {'status': 'ok', 'health': '/health', 'docs': '/docs'}
 
 
 @app.get('/health')

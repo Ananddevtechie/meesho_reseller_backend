@@ -18,7 +18,7 @@ from app.schemas import (
 	RazorpayOrderResponse,
 	RazorpayVerificationRequest,
 )
-from app.services.order_notifications import OrderNotificationError, send_order_notification
+from app.services.order_notification_delivery import deliver_order_notification
 from app.services.razorpay import (
 	RazorpayError,
 	create_order as create_razorpay_order,
@@ -50,40 +50,10 @@ def _priced_total(request: CodOrderRequest, product: Product) -> tuple[Decimal, 
 	return subtotal, discount, total
 
 
-def _order_payload(order: Order) -> dict[str, Any]:
-	return {
-		'order_id': order.id,
-		'product_sku': order.product_sku,
-		'product_title': order.product_title,
-		'quantity': order.quantity,
-		'mrp': order.mrp,
-		'discount': order.discount,
-		'shipping': order.shipping,
-		'tax': order.tax,
-		'cod_fee': order.cod_fee,
-		'total': order.total,
-		'payment_method': order.payment_method,
-		'payment_status': order.payment_status,
-		'payment_reference': order.payment_reference,
-		'full_name': order.customer_name,
-		'customer_email': order.customer_email,
-		'mobile': order.customer_mobile,
-		'alternate_mobile': order.alternate_mobile,
-		'address_line1': order.address_line1,
-		'address_line2': order.address_line2,
-		'landmark': order.landmark,
-		'pin': order.pincode,
-		'city': order.city,
-		'state': order.state,
-		'order_date': order.created_at.strftime('%Y-%m-%d %H:%M UTC'),
-		'expected_delivery_range': order.expected_delivery_range,
-	}
-
-
 def _paid_response(order: Order) -> PaidOrderResponse:
 	message = (
-		f'Order details emailed to {settings.order_notification_email}.'
-		if order.email_status == 'SENT'
+		'The store has been notified of your order.'
+		if order.notification_status == 'SENT'
 		else 'Payment confirmed. The store will follow up with your order details.'
 	)
 	return PaidOrderResponse(
@@ -98,16 +68,15 @@ def _paid_response(order: Order) -> PaidOrderResponse:
 		currency='INR',
 		order_date=order.created_at,
 		expected_delivery_range=order.expected_delivery_range,
-		email_status=order.email_status,
-		email_notification_message=message,
-		notification_recipient=settings.order_notification_email,
+		notification_status=order.notification_status,
+		notification_message=message,
 	)
 
 
 def _payment_status_response(order: Order) -> PaymentStatusResponse:
 	message = (
-		f'Order details emailed to {settings.order_notification_email}.'
-		if order.email_status == 'SENT'
+		'The store has been notified of your order.'
+		if order.notification_status == 'SENT'
 		else 'Payment confirmed. The store will follow up with your order details.'
 		if order.payment_status == 'PAID'
 		else 'Waiting for payment provider confirmation.'
@@ -124,27 +93,9 @@ def _payment_status_response(order: Order) -> PaymentStatusResponse:
 		currency='INR',
 		order_date=order.created_at,
 		expected_delivery_range=order.expected_delivery_range,
-		email_status=order.email_status,
-		email_notification_message=message,
-		notification_recipient=settings.order_notification_email,
+		notification_status=order.notification_status,
+		notification_message=message,
 	)
-def _notify_paid_order(order: Order) -> None:
-	order.email_status = 'SENDING'
-	order.email_attempts += 1
-	order.email_error = None
-	with SessionLocal() as session:
-		session.add(order)
-		session.commit()
-	try:
-		send_order_notification(_order_payload(order))
-	except OrderNotificationError as error:
-		order.email_status = 'FAILED'
-		order.email_error = str(error)
-	else:
-		order.email_status = 'SENT'
-	with SessionLocal() as session:
-		session.merge(order)
-		session.commit()
 
 
 @router.post('/orders', response_model=RazorpayOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -215,8 +166,8 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		state=customer_details['state'],
 		pincode=customer_details['pincode'],
 		expected_delivery_range=settings.cod_expected_delivery_range,
-		email_status='PENDING',
-		email_attempts=0,
+		notification_status='PENDING',
+		notification_attempts=0,
 	)
 	try:
 		with SessionLocal() as session:
@@ -279,9 +230,9 @@ def _confirm_order(order_id: str, provider_order_id: str, payment_id: str, payme
 		order = session.get(Order, order_id)
 		if not order:
 			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order was not found.')
-		should_notify = order.email_status == 'PENDING'
+		should_notify = order.notification_status in {'PENDING', 'FAILED'}
 	if should_notify:
-		_notify_paid_order(order)
+		deliver_order_notification(order.id)
 	with SessionLocal() as session:
 		order = session.get(Order, order_id)
 		if not order:

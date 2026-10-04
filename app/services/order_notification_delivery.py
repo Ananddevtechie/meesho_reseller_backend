@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
 from app.models import Order
-from app.services.order_notifications import OrderNotificationError, send_order_notification
+from app.services.telegram_notifications import TelegramNotificationError, send_order_notification
 
 
 logger = logging.getLogger(__name__)
@@ -42,16 +42,16 @@ def _notification_payload(order: Order) -> dict[str, Any]:
     }
 
 
-def deliver_order_email(order_id: str) -> None:
+def deliver_order_notification(order_id: str) -> None:
     try:
         with SessionLocal() as session:
             claim = session.execute(
                 update(Order)
-                .where(Order.id == order_id, Order.email_status.in_(('PENDING', 'FAILED')))
+                .where(Order.id == order_id, Order.notification_status.in_(('PENDING', 'FAILED')))
                 .values(
-                    email_status='SENDING',
-                    email_attempts=Order.email_attempts + 1,
-                    email_error=None,
+                    notification_status='SENDING',
+                    notification_attempts=Order.notification_attempts + 1,
+                    notification_error=None,
                 )
             )
             session.commit()
@@ -62,28 +62,27 @@ def deliver_order_email(order_id: str) -> None:
                 return
             payload = _notification_payload(order)
     except SQLAlchemyError:
-        logger.exception('Could not claim order email delivery for order %s.', order_id)
+        logger.exception('Could not claim Telegram notification for order %s.', order_id)
         return
 
-    email_error: str | None = None
+    notification_error: str | None = None
     try:
         send_order_notification(payload)
-    except OrderNotificationError as error:
-        email_error = str(error)
-        cause = error.__cause__
+    except TelegramNotificationError as error:
+        notification_error = str(error)
         logger.error(
-            'Order email delivery failed for order %s (cause: %s).',
+            'Telegram notification failed for order %s (cause: %s).',
             order_id,
-            type(cause).__name__ if cause else type(error).__name__,
+            type(error.__cause__).__name__ if error.__cause__ else type(error).__name__,
         )
 
     try:
         with SessionLocal() as session:
             order = session.get(Order, order_id)
-            if order is None or order.email_status != 'SENDING':
+            if order is None or order.notification_status != 'SENDING':
                 return
-            order.email_status = 'FAILED' if email_error else 'SENT'
-            order.email_error = email_error
+            order.notification_status = 'FAILED' if notification_error else 'SENT'
+            order.notification_error = notification_error
             session.commit()
     except SQLAlchemyError:
-        logger.exception('Could not save order email delivery result for order %s.', order_id)
+        logger.exception('Could not save Telegram notification result for order %s.', order_id)

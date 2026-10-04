@@ -27,12 +27,14 @@ account with a salted password hash.
 
 The Razorpay and COD flows write orders to `orders`, and catalog listings are
 stored in `products`. Customer details are stored separately in `customers`.
-COD orders are committed before email delivery, and the client supplies an
-`Idempotency-Key` so retries cannot create duplicate orders. Email status,
-attempt count, and the last delivery error are stored on the order. SMTP retries
-transient failures up to three times. A failed order email can be retried by an
+COD orders are committed before Telegram notification delivery, and the client supplies an
+`Idempotency-Key` so retries cannot create duplicate orders. Notification status,
+attempt count, and the last delivery error are stored on the order. Telegram retries
+transient failures up to three times. A failed order notification can be retried by an
 admin with Basic authentication using `POST
-/api/admin/orders/{order_id}/retry-email`. Payment, shipment, expense, and
+/api/admin/orders/{order_id}/retry-notification`. Set `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` in `backend/.env`, then send `/start` to the bot from the target chat.
+Apply the migrations to rename the existing notification status fields. Payment, shipment, expense, and
 profit/loss tables remain unused.
 
 ## Product catalog

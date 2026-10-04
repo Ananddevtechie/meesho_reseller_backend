@@ -167,9 +167,8 @@ class CodOrderResponse(BaseModel):
 	currency: Literal['INR']
 	order_date: datetime
 	expected_delivery_range: str
-	email_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
-	email_notification_message: str
-	notification_recipient: str
+	notification_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
+	notification_message: str
 
 
 class RazorpayOrderResponse(BaseModel):
@@ -204,9 +203,8 @@ class PaidOrderResponse(BaseModel):
 	currency: Literal['INR']
 	order_date: datetime
 	expected_delivery_range: str
-	email_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
-	email_notification_message: str
-	notification_recipient: str
+	notification_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
+	notification_message: str
 
 
 
@@ -222,6 +220,5 @@ class PaymentStatusResponse(BaseModel):
 	currency: Literal['INR']
 	order_date: datetime
 	expected_delivery_range: str
-	email_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
-	email_notification_message: str
-	notification_recipient: str
+	notification_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
+	notification_message: str

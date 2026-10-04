@@ -10,7 +10,7 @@ from app.database import SessionLocal
 from app.models import Admin, Order, OrderItem, Product
 from app.schemas import AdminLoginRequest, AdminLoginResponse, ProductAdmin, ProductCreateRequest, ProductPublic
 from app.services.admin_auth import verify_password
-from app.services.order_email_delivery import deliver_order_email
+from app.services.order_notification_delivery import deliver_order_notification
 
 
 router = APIRouter(tags=['products'])
@@ -140,8 +140,8 @@ def delete_product(slug: str, authorization: Optional[str] = Header(default=None
 	return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post('/api/admin/orders/{order_id}/retry-email', status_code=status.HTTP_202_ACCEPTED)
-def retry_order_email(
+@router.post('/api/admin/orders/{order_id}/retry-notification', status_code=status.HTTP_202_ACCEPTED)
+def retry_order_notification(
 	order_id: str,
 	authorization: Optional[str] = Header(default=None),
 ) -> dict[str, str]:
@@ -150,16 +150,16 @@ def retry_order_email(
 		order = session.get(Order, order_id)
 	if order is None:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
-	if order.email_status == 'SENT':
-		return {'email_status': 'SENT', 'message': 'Order email was already sent.'}
-	if order.email_status == 'SENDING':
-		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This order email is already being sent.')
+	if order.notification_status == 'SENT':
+		return {'notification_status': 'SENT', 'message': 'Order notification was already sent.'}
+	if order.notification_status == 'SENDING':
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This order notification is already being sent.')
 	if order.order_status != 'PLACED':
-		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Only placed orders can have their email retried.')
-	deliver_order_email(order_id)
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Only placed orders can have their notification retried.')
+	deliver_order_notification(order_id)
 	with SessionLocal() as session:
 		order = session.get(Order, order_id)
 	if order is None:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
-	message = 'Order email sent.' if order.email_status == 'SENT' else 'Order email could not be sent; check backend logs.'
-	return {'email_status': order.email_status, 'message': message}
+	message = 'Order notification sent.' if order.notification_status == 'SENT' else 'Order notification could not be sent; check backend logs.'
+	return {'notification_status': order.notification_status, 'message': message}

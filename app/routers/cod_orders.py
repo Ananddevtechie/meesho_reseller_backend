@@ -11,19 +11,19 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Order, Product
 from app.schemas import CodOrderRequest, CodOrderResponse
-from app.services.order_email_delivery import deliver_order_email
+from app.services.order_notification_delivery import deliver_order_notification
 
 
 router = APIRouter(prefix='/api/orders', tags=['orders'])
 
 
 def _cod_order_response(order: Order) -> CodOrderResponse:
-    if order.email_status == 'SENT':
-        email_message = f'Order email sent to {settings.order_notification_email}.'
-    elif order.email_status == 'FAILED':
-        email_message = 'Your order is confirmed. The store email notification could not be sent yet.'
+    if order.notification_status == 'SENT':
+        notification_message = 'The store has been notified of your order.'
+    elif order.notification_status == 'FAILED':
+        notification_message = 'Your order is confirmed. The store notification is pending.'
     else:
-        email_message = 'Your order is confirmed. The store email notification is being sent.'
+        notification_message = 'Your order is confirmed. The store is being notified.'
     return CodOrderResponse(
         order_id=order.id,
         order_status='PLACED',
@@ -43,13 +43,11 @@ def _cod_order_response(order: Order) -> CodOrderResponse:
         currency='INR',
         order_date=order.created_at,
         expected_delivery_range=order.expected_delivery_range,
-        email_status=order.email_status,
-        email_notification_message=email_message,
-        notification_recipient=settings.order_notification_email,
+        notification_status=order.notification_status,
+        notification_message=notification_message,
     )
 
 
-@router.post('/cod-email', response_model=CodOrderResponse, status_code=status.HTTP_201_CREATED)
 @router.post('/cod', response_model=CodOrderResponse, status_code=status.HTTP_201_CREATED)
 def create_cod_order(
     request: CodOrderRequest,
@@ -113,9 +111,9 @@ def create_cod_order(
                     state=request.state,
                     pincode=request.pin,
                     expected_delivery_range=settings.cod_expected_delivery_range,
-                    email_status='PENDING',
-                    email_attempts=0,
-                    email_error=None,
+                    notification_status='PENDING',
+                    notification_attempts=0,
+                    notification_error=None,
                     whatsapp_opt_in=False,
                     whatsapp_status='NOT_OPTED_IN',
                     created_at=now,
@@ -132,8 +130,8 @@ def create_cod_order(
     except SQLAlchemyError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save the COD order.') from error
 
-    if order.email_status in {'PENDING', 'FAILED'}:
-        deliver_order_email(order.id)
+    if order.notification_status in {'PENDING', 'FAILED'}:
+        deliver_order_notification(order.id)
         try:
             with SessionLocal() as session:
                 order = session.get(Order, order.id)
