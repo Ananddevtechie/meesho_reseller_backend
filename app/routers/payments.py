@@ -23,6 +23,7 @@ from app.services.razorpay import (
 	RazorpayAuthenticationError,
 	RazorpayError,
 	create_order as create_razorpay_order,
+	fetch_order_payments,
 	fetch_payment,
 	is_configured as razorpay_is_configured,
 	verify_payment_signature,
@@ -256,7 +257,35 @@ def get_payment_status(order_id: str) -> PaymentStatusResponse:
 		order = session.get(Order, order_id)
 		if not order or order.payment_method != 'UPI':
 			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Payment order was not found.')
-		return _payment_status_response(order)
+		response = _payment_status_response(order)
+		provider_order_id = order.payment_reference if order.payment_status == 'PAYMENT_PENDING' else None
+	if provider_order_id and razorpay_is_configured():
+		try:
+			payments = fetch_order_payments(provider_order_id)
+		except RazorpayAuthenticationError as error:
+			raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
+		except RazorpayError as error:
+			raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(error)) from error
+		captured_payment = next(
+			(
+				payment for payment in payments
+				if payment.get('order_id') == provider_order_id
+				and payment.get('status') == 'captured'
+				and payment.get('method') == 'upi'
+				and isinstance(payment.get('id'), str)
+				and payment['id']
+			),
+			None,
+		)
+		if captured_payment:
+			confirmed = _confirm_order(
+				order_id,
+				provider_order_id,
+				captured_payment.get('id', ''),
+				captured_payment,
+			)
+			return PaymentStatusResponse.model_validate(confirmed.model_dump())
+	return response
 
 
 @router.post('/verify', response_model=PaymentStatusResponse)
@@ -270,12 +299,9 @@ def verify_payment(request: RazorpayVerificationRequest) -> PaymentStatusRespons
 			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Payment order was not found.')
 		if order.payment_status == 'PAID' and order.payment_reference != request.payment_id:
 			raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This order has already been paid.')
-	_validate_captured_payment(provider_order_id, request.payment_id, request.signature)
-	with SessionLocal() as session:
-		order = session.get(Order, request.order_id)
-		if not order:
-			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Payment order was not found.')
-		return _payment_status_response(order)
+	payment = _validate_captured_payment(provider_order_id, request.payment_id, request.signature)
+	confirmed = _confirm_order(request.order_id, provider_order_id, request.payment_id, payment)
+	return PaymentStatusResponse.model_validate(confirmed.model_dump())
 
 
 @router.post('/webhook')

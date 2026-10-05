@@ -56,7 +56,9 @@ Angular app from `frontend/` with `npm start`, then complete checkout from a
 product page. In the Razorpay Dashboard, configure `order.paid` and
 `payment.failed` webhooks to `/api/payments/razorpay/webhook` and set the
 matching `RAZORPAY_WEBHOOK_SECRET` in the backend environment so payment status
-updates are confirmed server-side.
+updates are confirmed server-side. The verification callback marks captured
+payments as paid, and status checks reconcile pending orders against Razorpay
+so delayed or missing webhooks do not leave successful payments pending.
 
 ## Product catalog
 

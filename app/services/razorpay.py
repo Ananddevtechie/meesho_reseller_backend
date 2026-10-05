@@ -67,6 +67,14 @@ def fetch_payment(payment_id: str) -> dict[str, Any]:
 	return _request('GET', f'/payments/{payment_id}')
 
 
+def fetch_order_payments(provider_order_id: str) -> list[dict[str, Any]]:
+	payload = _request('GET', f'/orders/{provider_order_id}/payments')
+	payments = payload.get('items')
+	if not isinstance(payments, list) or not all(isinstance(payment, dict) for payment in payments):
+		raise RazorpayError('Razorpay returned an invalid order payment list.')
+	return payments
+
+
 def verify_payment_signature(provider_order_id: str, payment_id: str, signature: str) -> bool:
 	message = f'{provider_order_id}|{payment_id}'.encode()
 	expected = hmac.new(
