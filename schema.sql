@@ -99,6 +99,8 @@ CREATE TABLE orders (
     payment_status VARCHAR(30) NOT NULL,
     order_status VARCHAR(30) NOT NULL,
     payment_reference VARCHAR(255),
+    delivery_status VARCHAR(40) NOT NULL DEFAULT 'ORDER_CONFIRMED',
+    estimated_delivery_date DATE,
     customer_name VARCHAR(120) NOT NULL,
     customer_email VARCHAR(255),
     customer_mobile VARCHAR(20) NOT NULL,
@@ -121,6 +123,16 @@ CREATE TABLE orders (
     customer_id VARCHAR(141) REFERENCES customers(id),
     CONSTRAINT uq_orders_idempotency_key UNIQUE (idempotency_key)
 );
+
+CREATE TABLE order_tracking_events (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(40) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    status VARCHAR(40) NOT NULL,
+    estimated_delivery_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX ix_order_tracking_events_order_id ON order_tracking_events(order_id);
 
 CREATE TABLE order_items (
     id VARCHAR(36) PRIMARY KEY,

@@ -10,6 +10,7 @@ from app.database import check_database_connection
 from app.schemas import AddressExtractionRequest, ExtractedAddress
 from app.routers.cod_orders import router as cod_orders_router
 from app.routers.customers import router as customers_router
+from app.routers.order_tracking import router as order_tracking_router
 from app.routers.payments import router as payments_router
 from app.routers.products import router as products_router
 from app.services.ai_parser import GeminiExtractionError, extract_address
@@ -42,6 +43,7 @@ app.add_middleware(
 )
 app.include_router(cod_orders_router)
 app.include_router(customers_router)
+app.include_router(order_tracking_router)
 app.include_router(payments_router)
 app.include_router(products_router)
 

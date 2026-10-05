@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Order, Product
+from app.models import Order, OrderTrackingEvent, Product
 from app.schemas import CodOrderRequest, CodOrderResponse
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 
@@ -99,6 +99,7 @@ def create_cod_order(
                     payment_method='COD',
                     payment_status='COD_PENDING',
                     order_status='PLACED',
+                    delivery_status='ORDER_CONFIRMED',
                     payment_reference=None,
                     customer_name=request.full_name,
                     customer_email=request.customer_email,
@@ -119,6 +120,13 @@ def create_cod_order(
                     created_at=now,
                 )
                 session.add(order)
+                session.add(OrderTrackingEvent(
+                    id=uuid.uuid4().hex,
+                    order_id=order.id,
+                    status=order.delivery_status,
+                    estimated_delivery_date=None,
+                    created_at=now,
+                ))
                 session.commit()
     except IntegrityError as error:
         with SessionLocal() as session:

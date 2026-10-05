@@ -155,6 +155,10 @@ class Order(Base):
 	payment_status: Mapped[str] = mapped_column(String(30), nullable=False, default='COD_PENDING')
 	order_status: Mapped[str] = mapped_column(String(30), nullable=False, default='PLACED')
 	payment_reference: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+	delivery_status: Mapped[str] = mapped_column(
+		String(40), nullable=False, default='ORDER_CONFIRMED', server_default='ORDER_CONFIRMED'
+	)
+	estimated_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 	customer_name: Mapped[str] = mapped_column(String(120), nullable=False)
 	customer_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 	customer_mobile: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -181,6 +185,18 @@ class Order(Base):
 		default=lambda: datetime.now(timezone.utc),
 		onupdate=lambda: datetime.now(timezone.utc),
 		nullable=False,
+	)
+
+
+class OrderTrackingEvent(Base):
+	__tablename__ = 'order_tracking_events'
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	order_id: Mapped[str] = mapped_column(ForeignKey('orders.id', ondelete='CASCADE'), nullable=False, index=True)
+	status: Mapped[str] = mapped_column(String(40), nullable=False)
+	estimated_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
 	)
 
 

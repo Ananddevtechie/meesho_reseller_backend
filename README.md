@@ -60,6 +60,15 @@ updates are confirmed server-side. The verification callback marks captured
 payments as paid, and status checks reconcile pending orders against Razorpay
 so delayed or missing webhooks do not leave successful payments pending.
 
+## Order delivery tracking
+
+Apply the latest database migration with `alembic upgrade head` before
+deploying the backend. The admin order page at `/admin/orders` requires the
+existing admin login. Delivery status and estimated delivery date changes are
+saved to `orders` and recorded in `order_tracking_events`; customers can view
+the public, non-sensitive tracking timeline at `/track-order/{order_id}` after
+an online payment is confirmed or a COD order is placed.
+
 ## Product catalog
 
 Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the backend environment, then apply

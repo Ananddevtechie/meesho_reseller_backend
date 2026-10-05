@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -10,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Customer, Order, Product
+from app.models import Customer, Order, OrderTrackingEvent, Product
 from app.schemas import (
 	CodOrderRequest,
 	PaidOrderResponse,
@@ -234,6 +235,16 @@ def _confirm_order(order_id: str, provider_order_id: str, payment_id: str, payme
 		order.order_status = 'PLACED'
 		order.payment_status = 'PAID'
 		order.payment_reference = payment_id
+		if not session.scalar(
+			select(OrderTrackingEvent.id).where(OrderTrackingEvent.order_id == order.id).limit(1)
+		):
+			session.add(OrderTrackingEvent(
+				id=uuid.uuid4().hex,
+				order_id=order.id,
+				status=order.delivery_status,
+				estimated_delivery_date=order.estimated_delivery_date,
+				created_at=datetime.now(timezone.utc),
+			))
 		session.commit()
 		order_id = order.id
 

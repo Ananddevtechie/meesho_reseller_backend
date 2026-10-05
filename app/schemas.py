@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -250,3 +250,52 @@ class PaymentStatusResponse(BaseModel):
 	expected_delivery_range: str
 	notification_status: Literal['PENDING', 'SENDING', 'SENT', 'FAILED']
 	notification_message: str
+
+
+DeliveryStatus = Literal[
+	'ORDER_CONFIRMED',
+	'PROCESSING',
+	'PACKED',
+	'SHIPPED',
+	'IN_TRANSIT',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'CANCELLED',
+]
+
+
+class OrderTrackingEventResponse(BaseModel):
+	status: DeliveryStatus
+	estimated_delivery_date: Optional[date]
+	created_at: datetime
+
+
+class OrderTrackingResponse(BaseModel):
+	order_id: str
+	product_title: str
+	product_sku: str
+	quantity: int
+	total: Decimal
+	currency: Literal['INR']
+	payment_method: Literal['COD', 'UPI']
+	payment_status: str
+	delivery_status: DeliveryStatus
+	estimated_delivery_date: Optional[date]
+	order_date: datetime
+	tracking_events: list[OrderTrackingEventResponse]
+
+
+class AdminOrderTrackingResponse(OrderTrackingResponse):
+	customer_name: str
+	customer_mobile: str
+	address_line1: str
+	address_line2: str
+	landmark: Optional[str]
+	city: str
+	state: str
+	pincode: str
+
+
+class AdminOrderTrackingUpdate(BaseModel):
+	delivery_status: DeliveryStatus
+	estimated_delivery_date: Optional[date] = None
