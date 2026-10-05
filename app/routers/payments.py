@@ -145,7 +145,7 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		id=order_id,
 		idempotency_key=f'UPI-{provider_order_id}',
 		request_fingerprint=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-		product_id=settings.cod_product_id,
+		product_id=product.id,
 		customer_id=customer_details['id'],
 		product_sku=product.sku,
 		product_title=product.title,
