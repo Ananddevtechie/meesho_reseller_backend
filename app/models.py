@@ -68,6 +68,15 @@ class Product(Base):
 	)
 
 
+class ProductImage(Base):
+	__tablename__ = 'product_images'
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	product_id: Mapped[str] = mapped_column(ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
+	content_type: Mapped[str] = mapped_column(String(40), nullable=False)
+	image_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
 class ProductReview(Base):
 	__tablename__ = 'product_reviews'
 	__table_args__ = (CheckConstraint('rating >= 1 AND rating <= 5', name='ck_product_reviews_rating_range'),)

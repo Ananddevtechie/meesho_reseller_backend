@@ -37,6 +37,14 @@ CREATE TABLE products (
     CONSTRAINT uq_products_sku UNIQUE (sku)
 );
 
+CREATE TABLE product_images (
+    id VARCHAR(36) PRIMARY KEY,
+    product_id VARCHAR(100) NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    content_type VARCHAR(40) NOT NULL,
+    image_data BYTEA NOT NULL
+);
+CREATE INDEX ix_product_images_product_id ON product_images(product_id);
+
 CREATE TABLE admins (
     id VARCHAR(36) PRIMARY KEY,
     username VARCHAR(120) NOT NULL,

@@ -1,4 +1,5 @@
 import hmac
+import json
 import uuid
 from base64 import b64decode
 from typing import Optional
@@ -6,9 +7,10 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, status
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from pydantic import ValidationError
 
 from app.database import SessionLocal
-from app.models import Admin, Order, OrderItem, Product, ProductReview, ProductReviewImage
+from app.models import Admin, Order, OrderItem, Product, ProductImage, ProductReview, ProductReviewImage
 from app.schemas import (
 	AdminLoginRequest,
 	AdminLoginResponse,
@@ -27,6 +29,9 @@ _DUMMY_PASSWORD_HASH = 'pbkdf2_sha256$600000$00000000000000000000000000000000$00
 _MAX_REVIEW_IMAGES = 5
 _MAX_REVIEW_IMAGE_BYTES = 5 * 1024 * 1024
 _REVIEW_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+_MAX_PRODUCT_IMAGES = 10
+_MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
+_PRODUCT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 
 
 def _review_summary(session, slug: str) -> ProductReviewSummary:
@@ -57,12 +62,27 @@ def _review_summary(session, slug: str) -> ProductReviewSummary:
 	return ProductReviewSummary(average_rating=average_rating, review_count=len(reviews), reviews=items)
 
 
-def _valid_review_image(content_type: str, data: bytes) -> bool:
+def _valid_image_data(content_type: str, data: bytes) -> bool:
 	if content_type == 'image/jpeg':
 		return data.startswith(b'\xff\xd8\xff')
 	if content_type == 'image/png':
 		return data.startswith(b'\x89PNG\r\n\x1a\n')
 	return content_type == 'image/webp' and data.startswith(b'RIFF') and data[8:12] == b'WEBP'
+
+
+async def _read_product_image(image: UploadFile) -> tuple[str, bytes]:
+	try:
+		content_type = (image.content_type or '').lower()
+		if content_type not in _PRODUCT_IMAGE_TYPES:
+			raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail='Product images must be JPEG, PNG, or WebP.')
+		data = await image.read(_MAX_PRODUCT_IMAGE_BYTES + 1)
+		if len(data) > _MAX_PRODUCT_IMAGE_BYTES:
+			raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Each product image must be 5 MB or smaller.')
+		if not _valid_image_data(content_type, data):
+			raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail='The uploaded file is not a valid image.')
+		return content_type, data
+	finally:
+		await image.close()
 
 
 def _admin_credentials_match(username: str, password: str) -> bool:
@@ -116,6 +136,29 @@ def get_product(slug: str) -> Product:
 	if product is None:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
 	return product
+
+
+@router.get('/api/products/{slug}/images/{image_id}')
+def get_product_image(slug: str, image_id: str) -> Response:
+	try:
+		with SessionLocal() as session:
+			image = session.scalar(
+				select(ProductImage)
+				.join(Product, Product.id == ProductImage.product_id)
+				.where(
+					Product.id == slug,
+					ProductImage.id == image_id,
+				)
+			)
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load the product image.') from error
+	if image is None:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product image not found.')
+	return Response(
+		content=image.image_data,
+		media_type=image.content_type,
+		headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+	)
 
 
 @router.get('/api/products/{slug}/reviews', response_model=ProductReviewSummary)
@@ -192,7 +235,7 @@ async def create_product_review(
 		await image.close()
 		if len(data) > _MAX_REVIEW_IMAGE_BYTES:
 			raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Each review image must be 5 MB or smaller.')
-		if not _valid_review_image(content_type, data):
+		if not _valid_image_data(content_type, data):
 			raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail='The uploaded file is not a valid image.')
 		image_data.append((content_type, data))
 	try:
@@ -230,6 +273,96 @@ def list_admin_products(authorization: Optional[str] = Header(default=None)) -> 
 			return list(session.scalars(select(Product).order_by(Product.created_at.desc())))
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load admin products.') from error
+
+
+@router.post('/api/admin/products/save', response_model=ProductAdmin)
+async def save_product_with_images(
+	product_data: str = Form(...),
+	main_image: Optional[UploadFile] = File(default=None),
+	additional_images: list[UploadFile] = File(default=[]),
+	authorization: Optional[str] = Header(default=None),
+) -> Product:
+	_require_admin(authorization)
+	if len(additional_images) > _MAX_PRODUCT_IMAGES:
+		raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Upload no more than ten additional product images.')
+
+	try:
+		values = json.loads(product_data)
+	except json.JSONDecodeError as error:
+		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product details are invalid.') from error
+	if not isinstance(values, dict):
+		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product details are invalid.')
+	if main_image is not None and not values.get('image_url'):
+		values['image_url'] = 'uploaded-image'
+	try:
+		request = ProductCreateRequest.model_validate(values)
+	except ValidationError as error:
+		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product details are invalid.') from error
+
+	uploaded_images: list[tuple[str, bytes]] = []
+	if main_image is not None:
+		uploaded_images.append(await _read_product_image(main_image))
+	for image in additional_images:
+		uploaded_images.append(await _read_product_image(image))
+
+	try:
+		with SessionLocal() as session:
+			product = session.get(Product, request.slug)
+			is_new = product is None
+			if is_new:
+				product = Product(id=request.slug, **request.model_dump(exclude={'slug'}))
+				session.add(product)
+				old_main_image_url = None
+			else:
+				old_main_image_url = product.image_url
+				for field, value in request.model_dump(exclude={'slug'}).items():
+					setattr(product, field, value)
+			session.flush()
+
+			next_gallery = list(request.gallery)
+			if main_image is not None:
+				next_gallery = [
+					image for image in next_gallery
+					if image.get('src') not in {old_main_image_url, request.image_url}
+				]
+			for index, (content_type, data) in enumerate(uploaded_images):
+				image_id = uuid.uuid4().hex
+				session.add(ProductImage(
+					id=image_id,
+					product_id=request.slug,
+					content_type=content_type,
+					image_data=data,
+				))
+				image_url = f'/api/products/{request.slug}/images/{image_id}'
+				if index == 0 and main_image is not None:
+					product.image_url = image_url
+					next_gallery.insert(0, {'src': image_url, 'alt': request.title, 'label': 'Product'})
+				else:
+					additional_index = index - (1 if main_image is not None else 0) + 1
+					next_gallery.append({
+						'src': image_url,
+						'alt': f'{request.title} product view {additional_index}',
+						'label': f'View {additional_index}',
+					})
+			if not any(image.get('src') == product.image_url for image in next_gallery):
+				next_gallery.insert(0, {'src': product.image_url, 'alt': request.title, 'label': 'Product'})
+			product.gallery = next_gallery
+			session.flush()
+
+			referenced_urls = {product.image_url, *(image.get('src', '') for image in product.gallery)}
+			for stored_image in session.scalars(
+				select(ProductImage).where(ProductImage.product_id == request.slug)
+			):
+				stored_url = f'/api/products/{request.slug}/images/{stored_image.id}'
+				if stored_url not in referenced_urls:
+					session.delete(stored_image)
+			session.commit()
+			session.refresh(product)
+			return product
+	except IntegrityError as error:
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A product with this slug or SKU already exists.') from error
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save this product.') from error
 
 
 @router.post('/api/admin/products', response_model=ProductAdmin, status_code=status.HTTP_201_CREATED)
