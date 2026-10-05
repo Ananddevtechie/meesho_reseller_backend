@@ -14,6 +14,10 @@ class RazorpayError(RuntimeError):
 	"""Raised when Razorpay cannot create or verify a payment."""
 
 
+class RazorpayAuthenticationError(RazorpayError):
+	"""Raised when Razorpay rejects the configured API credentials."""
+
+
 def is_configured() -> bool:
 	return bool(settings.razorpay_key_id and settings.razorpay_key_secret)
 
@@ -32,6 +36,10 @@ def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
 		if not isinstance(payload, dict):
 			raise RazorpayError('Razorpay returned an invalid response.')
 		return payload
+	except httpx.HTTPStatusError as error:
+		if error.response.status_code in {401, 403}:
+			raise RazorpayAuthenticationError('Razorpay rejected the configured API credentials.') from error
+		raise RazorpayError('Razorpay could not process the payment request.') from error
 	except (httpx.HTTPError, ValueError) as error:
 		raise RazorpayError('Razorpay could not process the payment request.') from error
 

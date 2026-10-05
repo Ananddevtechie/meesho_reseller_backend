@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 from app.database import check_database_connection
 from app.schemas import AddressExtractionRequest, ExtractedAddress
@@ -19,6 +22,18 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title='Meesho Reseller API', lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, error: RequestValidationError) -> Response:
+	if request.method == 'POST' and request.url.path == '/api/payments/razorpay/verify':
+		return JSONResponse(
+			status_code=400,
+			content={'detail': 'Payment verification fields are missing or invalid.'},
+		)
+	return await request_validation_exception_handler(request, error)
+
+
 app.add_middleware(
 	CORSMiddleware,
 	allow_origins=['http://localhost:4200', 'http://127.0.0.1:4200'],

@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 from app.services.razorpay import (
+	RazorpayAuthenticationError,
 	RazorpayError,
 	create_order as create_razorpay_order,
 	fetch_payment,
@@ -127,11 +128,18 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		}
 	subtotal, discount, total = _priced_total(request, product)
 	amount = int((total * 100).to_integral_exact())
+	if amount < 100:
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail='The minimum payment amount is ₹1.00.',
+		)
 	order_id = f"ORD-{uuid.uuid4().hex[:16].upper()}"
 	try:
 		provider_order_id = create_razorpay_order(amount, order_id, settings.razorpay_checkout_config_id or None)
+	except RazorpayAuthenticationError as error:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
 	except RazorpayError as error:
-		raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+		raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(error)) from error
 
 	order = Order(
 		id=order_id,
@@ -195,8 +203,10 @@ def _validate_captured_payment(provider_order_id: str, payment_id: str, signatur
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Payment signature is invalid.')
 	try:
 		payment = fetch_payment(payment_id)
+	except RazorpayAuthenticationError as error:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
 	except RazorpayError as error:
-		raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+		raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(error)) from error
 	if (
 		payment.get('order_id') != provider_order_id
 		or payment.get('status') != 'captured'

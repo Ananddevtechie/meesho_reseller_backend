@@ -40,6 +40,24 @@ target chat. Apply the migrations to rename the existing notification status fie
 Payment, shipment, expense, and
 profit/loss tables remain unused.
 
+## Razorpay checkout
+
+Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `backend/.env` (or the
+backend host's environment). The backend creates INR orders from the current
+catalog price, rejects payments below ₹1.00, and verifies the payment signature
+before marking an order paid. The Angular checkout loads Razorpay Standard
+Checkout and sends the returned payment details to the backend. Never expose the
+secret key to the frontend. Use Razorpay Test Mode keys and test cards/UPI
+handles before switching to Live Mode.
+
+The checkout API is available at `POST /api/payments/razorpay/orders` and
+`POST /api/payments/razorpay/verify`. Run the backend as described above and the
+Angular app from `frontend/` with `npm start`, then complete checkout from a
+product page. In the Razorpay Dashboard, configure `order.paid` and
+`payment.failed` webhooks to `/api/payments/razorpay/webhook` and set the
+matching `RAZORPAY_WEBHOOK_SECRET` in the backend environment so payment status
+updates are confirmed server-side.
+
 ## Product catalog
 
 Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the backend environment, then apply
