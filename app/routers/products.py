@@ -1,5 +1,7 @@
 import hmac
 import json
+import threading
+import time
 import uuid
 from base64 import b64decode
 from typing import Optional
@@ -32,6 +34,17 @@ _REVIEW_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 _MAX_PRODUCT_IMAGES = 10
 _MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
 _PRODUCT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+_PRODUCT_LIST_CACHE_TTL_SECONDS = 30
+_product_list_cache_lock = threading.Lock()
+_product_list_cache: tuple[float, list[Product]] | None = None
+_product_list_cache_generation = 0
+
+
+def _invalidate_product_list_cache() -> None:
+	global _product_list_cache, _product_list_cache_generation
+	with _product_list_cache_lock:
+		_product_list_cache = None
+		_product_list_cache_generation += 1
 
 
 def _review_summary(session, slug: str) -> ProductReviewSummary:
@@ -118,12 +131,24 @@ def admin_login(request: AdminLoginRequest) -> AdminLoginResponse:
 
 
 @router.get('/api/products', response_model=list[ProductPublic])
-def list_products() -> list[Product]:
+def list_products(response: Response) -> list[Product]:
+	global _product_list_cache
+	response.headers['Cache-Control'] = 'public, max-age=0, s-maxage=30, stale-while-revalidate=120'
+	with _product_list_cache_lock:
+		if _product_list_cache is not None and _product_list_cache[0] > time.monotonic():
+			return list(_product_list_cache[1])
+		cache_generation = _product_list_cache_generation
 	try:
 		with SessionLocal() as session:
-			return list(session.scalars(select(Product).where(Product.is_active.is_(True)).order_by(Product.created_at.desc())))
+			products = list(session.scalars(
+				select(Product).where(Product.is_active.is_(True)).order_by(Product.created_at.desc())
+			))
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load products.') from error
+	with _product_list_cache_lock:
+		if cache_generation == _product_list_cache_generation:
+			_product_list_cache = (time.monotonic() + _PRODUCT_LIST_CACHE_TTL_SECONDS, products)
+	return products
 
 
 @router.get('/api/products/{slug}', response_model=ProductPublic)
@@ -358,6 +383,7 @@ async def save_product_with_images(
 					session.delete(stored_image)
 			session.commit()
 			session.refresh(product)
+			_invalidate_product_list_cache()
 			return product
 	except IntegrityError as error:
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A product with this slug or SKU already exists.') from error
@@ -377,6 +403,7 @@ def create_product(
 			session.add(product)
 			session.commit()
 			session.refresh(product)
+			_invalidate_product_list_cache()
 	except IntegrityError as error:
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A product with this slug or SKU already exists.') from error
 	except SQLAlchemyError as error:
@@ -402,6 +429,7 @@ def update_product(
 				setattr(product, field, value)
 			session.commit()
 			session.refresh(product)
+			_invalidate_product_list_cache()
 	except IntegrityError as error:
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A product with this SKU already exists.') from error
 	except SQLAlchemyError as error:
@@ -420,6 +448,7 @@ def delete_product(slug: str, authorization: Optional[str] = Header(default=None
 			session.execute(update(OrderItem).where(OrderItem.product_id == slug).values(product_id=None))
 			session.delete(product)
 			session.commit()
+			_invalidate_product_list_cache()
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not delete this product.') from error
 	return Response(status_code=status.HTTP_204_NO_CONTENT)
