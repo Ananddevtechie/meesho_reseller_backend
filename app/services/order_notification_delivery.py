@@ -8,7 +8,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
 from app.models import Order, Product
-from app.services.telegram_notifications import TelegramNotificationError, send_order_notification
+from app.services.telegram_notifications import (
+    TelegramNotificationError,
+    send_order_cancellation_notification,
+    send_order_notification,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -22,7 +26,7 @@ def is_stale_notification(order: Order) -> bool:
     )
 
 
-def _notification_payload(order: Order, meesho_url: Optional[str] = None) -> dict[str, Any]:
+def build_order_notification_payload(order: Order, meesho_url: Optional[str] = None) -> dict[str, Any]:
     order_date = order.created_at
     if order_date.tzinfo is None:
         order_date = order_date.replace(tzinfo=timezone.utc)
@@ -41,6 +45,7 @@ def _notification_payload(order: Order, meesho_url: Optional[str] = None) -> dic
         'total': order.total,
         'payment_method': order.payment_method,
         'payment_status': order.payment_status,
+        'order_status': order.order_status,
         'payment_reference': order.payment_reference,
         'full_name': order.customer_name,
         'customer_email': order.customer_email,
@@ -87,14 +92,17 @@ def deliver_order_notification(order_id: str) -> None:
             if order is None:
                 return
             product = session.get(Product, order.product_id)
-            payload = _notification_payload(order, product.meesho_url if product else None)
+            payload = build_order_notification_payload(order, product.meesho_url if product else None)
     except SQLAlchemyError:
         logger.exception('Could not claim Telegram notification for order %s.', order_id)
         return
 
     notification_error: str | None = None
     try:
-        send_order_notification(payload)
+        if payload['order_status'] == 'CANCELLED':
+            send_order_cancellation_notification(payload)
+        else:
+            send_order_notification(payload)
     except TelegramNotificationError as error:
         notification_error = str(error)
         logger.error(

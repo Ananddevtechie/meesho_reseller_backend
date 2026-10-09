@@ -30,7 +30,7 @@ def _address_lines(order: dict[str, Any]) -> list[str]:
     return [f'{label}: {value.strip()}' for label, value in fields if value and value.strip()]
 
 
-def _message(order: dict[str, Any]) -> str:
+def _message(order: dict[str, Any], *, cancelled: bool = False) -> str:
     payment_method = 'COD' if order['payment_method'] == 'COD' else 'Online payment'
     payment_status = {
         'COD_PENDING': 'COD Pending',
@@ -40,8 +40,9 @@ def _message(order: dict[str, Any]) -> str:
     }.get(order['payment_status'], order['payment_status'].replace('_', ' ').title())
     return '\n'.join(
         (
-            'NEW THECART ORDER 🛍️',
+            'ORDER CANCELLED ❌' if cancelled else 'NEW THECART ORDER 🛍️',
             f"Order: {order['order_id']}",
+            *(['Order status: CANCELLED'] if cancelled else []),
             '------------------------------',
             '',
             'CUSTOMER',
@@ -71,7 +72,7 @@ def _message(order: dict[str, Any]) -> str:
     )
 
 
-def send_order_notification(order: dict[str, Any]) -> None:
+def _send_message(order: dict[str, Any], *, cancelled: bool) -> None:
     telegram_settings = Settings()
     missing_settings = [
         name
@@ -89,7 +90,7 @@ def send_order_notification(order: dict[str, Any]) -> None:
         )
 
     url = f'https://api.telegram.org/bot{telegram_settings.telegram_bot_token}/sendMessage'
-    payload = {'chat_id': telegram_settings.telegram_chat_id, 'text': _message(order)}
+    payload = {'chat_id': telegram_settings.telegram_chat_id, 'text': _message(order, cancelled=cancelled)}
     for attempt in range(3):
         try:
             response = httpx.post(url, json=payload, timeout=15)
@@ -105,7 +106,8 @@ def send_order_notification(order: dict[str, Any]) -> None:
             status_code = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
             retryable = status_code is None or status_code == 429 or status_code >= 500
             logger.warning(
-                'Telegram notification attempt %s/3 failed for order %s (%s, HTTP %s).',
+                'Telegram %s notification attempt %s/3 failed for order %s (%s, HTTP %s).',
+                'cancellation' if cancelled else 'order',
                 attempt + 1,
                 order['order_id'],
                 type(error).__name__,
@@ -114,3 +116,11 @@ def send_order_notification(order: dict[str, Any]) -> None:
             if not retryable or attempt == 2:
                 raise TelegramNotificationError('Telegram notification delivery failed.') from error
             time.sleep(0.5 * (2 ** attempt))
+
+
+def send_order_notification(order: dict[str, Any]) -> None:
+    _send_message(order, cancelled=False)
+
+
+def send_order_cancellation_notification(order: dict[str, Any]) -> None:
+    _send_message(order, cancelled=True)

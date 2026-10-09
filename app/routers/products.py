@@ -468,8 +468,8 @@ def retry_order_notification(
 		return {'notification_status': 'SENT', 'message': 'Order notification was already sent.'}
 	if order.notification_status == 'SENDING' and not is_stale_notification(order):
 		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This order notification is already being sent.')
-	if order.order_status != 'PLACED':
-		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Only placed orders can have their notification retried.')
+	if order.order_status not in {'PLACED', 'CANCELLED'}:
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Only placed or cancelled orders can have their notification retried.')
 	deliver_order_notification(order_id)
 	with SessionLocal() as session:
 		order = session.get(Order, order_id)

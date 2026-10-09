@@ -1,10 +1,11 @@
 import hashlib
 import hmac
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -21,6 +22,7 @@ from app.services.order_notification_delivery import deliver_order_notification,
 
 
 router = APIRouter(prefix='/api/orders', tags=['orders'])
+logger = logging.getLogger(__name__)
 
 
 def _cod_order_response(order: Order) -> CodOrderResponse:
@@ -157,7 +159,12 @@ def create_cod_order(
 
 
 @router.post('/{order_id}/cancel', response_model=CodOrderCancellationResponse)
-def cancel_cod_order(order_id: str, request: CodOrderCancellationRequest) -> CodOrderCancellationResponse:
+def cancel_cod_order(
+    order_id: str,
+    request: CodOrderCancellationRequest,
+    background_tasks: BackgroundTasks,
+) -> CodOrderCancellationResponse:
+    should_notify = False
     try:
         with SessionLocal() as session:
             order = session.scalar(select(Order).where(Order.id == order_id).with_for_update())
@@ -166,40 +173,44 @@ def cancel_cod_order(order_id: str, request: CodOrderCancellationRequest) -> Cod
             if not hmac.compare_digest(order.customer_mobile, request.mobile):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='The mobile number does not match this order.')
             if order.order_status == 'CANCELLED' and order.delivery_status == 'CANCELLED':
-                return CodOrderCancellationResponse(
-                    order_id=order.id,
-                    order_status='CANCELLED',
-                    delivery_status='CANCELLED',
-                )
-            if order.payment_method != 'COD' or order.payment_status != 'COD_PENDING':
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail='Only unpaid COD orders can be cancelled online.',
-                )
-            if order.order_status != 'PLACED' or order.delivery_status != 'ORDER_CONFIRMED':
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail='This order can no longer be cancelled online.',
-                )
+                should_notify = order.notification_status in {'PENDING', 'FAILED'} or is_stale_notification(order)
+            else:
+                if order.payment_method != 'COD' or order.payment_status != 'COD_PENDING':
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail='Only unpaid COD orders can be cancelled online.',
+                    )
+                if order.order_status != 'PLACED' or order.delivery_status != 'ORDER_CONFIRMED':
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail='This order can no longer be cancelled online.',
+                    )
 
-            now = datetime.now(timezone.utc)
-            order.order_status = 'CANCELLED'
-            order.delivery_status = 'CANCELLED'
-            session.add(OrderTrackingEvent(
-                id=uuid.uuid4().hex,
-                order_id=order.id,
-                status='CANCELLED',
-                estimated_delivery_date=None,
-                created_at=now,
-            ))
-            session.commit()
-            return CodOrderCancellationResponse(
-                order_id=order.id,
-                order_status='CANCELLED',
-                delivery_status='CANCELLED',
-            )
+                now = datetime.now(timezone.utc)
+                order.order_status = 'CANCELLED'
+                order.delivery_status = 'CANCELLED'
+                order.notification_status = 'PENDING'
+                order.notification_error = None
+                session.add(OrderTrackingEvent(
+                    id=uuid.uuid4().hex,
+                    order_id=order.id,
+                    status='CANCELLED',
+                    estimated_delivery_date=None,
+                    created_at=now,
+                ))
+                session.commit()
+                should_notify = True
     except SQLAlchemyError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail='Could not cancel the order. Please try again.',
         ) from error
+
+    if should_notify:
+        background_tasks.add_task(deliver_order_notification, order_id)
+
+    return CodOrderCancellationResponse(
+        order_id=order_id,
+        order_status='CANCELLED',
+        delivery_status='CANCELLED',
+    )
