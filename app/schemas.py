@@ -175,6 +175,16 @@ class CodOrderRequest(BaseModel):
 		return value
 
 
+class CodOrderCancellationRequest(BaseModel):
+	mobile: str = Field(pattern=r'^[6-9][0-9]{9}$')
+
+
+class CodOrderCancellationResponse(BaseModel):
+	order_id: str
+	order_status: Literal['CANCELLED']
+	delivery_status: Literal['CANCELLED']
+
+
 
 class CodOrderResponse(BaseModel):
 	order_id: str

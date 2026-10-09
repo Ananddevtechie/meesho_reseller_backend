@@ -47,6 +47,7 @@ def _message(order: dict[str, Any]) -> str:
             'CUSTOMER',
             f"Name: {order['full_name']}",
             f"Phone: +91 {order['mobile']}",
+            f"WhatsApp chat: https://wa.me/91{order['mobile']}",
             f"Alternate phone: {order.get('alternate_mobile') or 'Not provided'}",
             f"Email: {order.get('customer_email') or 'Not provided'}",
             '',
