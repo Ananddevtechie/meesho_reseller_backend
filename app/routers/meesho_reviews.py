@@ -45,6 +45,12 @@ def _product_id(product_url: str) -> str:
 	return match.group(1)
 
 
+def _sanitize_review_comment(comment: str) -> str:
+	comment = re.sub(r'\bmeesho\b', '', comment, flags=re.IGNORECASE)
+	comment = re.sub(r'\s+([,.;!?])', r'\1', comment)
+	return re.sub(r'\s+', ' ', comment).strip()
+
+
 def _parse_results(items: object) -> ProductReviewSummary:
 	if not isinstance(items, list):
 		raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail='The review scraper returned an invalid response.')
@@ -66,7 +72,7 @@ def _parse_results(items: object) -> ProductReviewSummary:
 				'id': str(item['reviewId']),
 				'reviewer_name': item['reviewerName'],
 				'rating': item['rating'],
-				'comment': item.get('comment') or '',
+				'comment': _sanitize_review_comment(item.get('comment') or ''),
 				'created_at': item['createdAt'],
 				'image_urls': images,
 			}))
@@ -85,7 +91,10 @@ def _parse_results(items: object) -> ProductReviewSummary:
 	)
 
 
-async def _run_scraper(product_url: str) -> ProductReviewSummary:
+async def _run_scraper(
+	product_url: str,
+	max_reviews_per_product: int = _REVIEWS_PER_PRODUCT,
+) -> ProductReviewSummary:
 	if not settings.apify_api_token:
 		raise HTTPException(
 			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -93,7 +102,7 @@ async def _run_scraper(product_url: str) -> ProductReviewSummary:
 		)
 	input_data = {
 		'productUrls': [product_url],
-		'maxReviewsPerProduct': _REVIEWS_PER_PRODUCT,
+		'maxReviewsPerProduct': max_reviews_per_product,
 		'reviewType': 'all',
 		'proxyConfiguration': {
 			'useApifyProxy': True,

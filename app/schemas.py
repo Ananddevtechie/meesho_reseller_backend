@@ -144,6 +144,29 @@ class ProductReviewSummary(BaseModel):
 	reviews: list[ProductReviewItem]
 
 
+class ProductReviewUpdate(BaseModel):
+	model_config = ConfigDict(str_strip_whitespace=True)
+
+	reviewer_name: str = Field(min_length=1, max_length=120)
+	rating: int = Field(ge=1, le=5)
+	comment: str = Field(min_length=1, max_length=2000)
+
+
+class ProductReviewImportRequest(BaseModel):
+	model_config = ConfigDict(str_strip_whitespace=True)
+
+	meesho_url: str = Field(min_length=1, max_length=2048)
+
+
+class ProductReviewImportResult(BaseModel):
+	imported_count: int
+	skipped_count: int
+	backfilled_review_count: int
+	saved_image_count: int
+	skipped_image_count: int
+	reviews: ProductReviewSummary
+
+
 class CodOrderRequest(BaseModel):
 	product_id: str = Field(min_length=1, max_length=100)
 	quantity: int = Field(ge=1, le=10)

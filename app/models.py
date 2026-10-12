@@ -79,13 +79,17 @@ class ProductImage(Base):
 
 class ProductReview(Base):
 	__tablename__ = 'product_reviews'
-	__table_args__ = (CheckConstraint('rating >= 1 AND rating <= 5', name='ck_product_reviews_rating_range'),)
+	__table_args__ = (
+		CheckConstraint('rating >= 1 AND rating <= 5', name='ck_product_reviews_rating_range'),
+		UniqueConstraint('product_id', 'source_review_id', name='uq_product_reviews_source_review'),
+	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
 	product_id: Mapped[str] = mapped_column(ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
 	reviewer_name: Mapped[str] = mapped_column(String(120), nullable=False)
 	rating: Mapped[int] = mapped_column(Integer, nullable=False)
 	comment: Mapped[str] = mapped_column(Text, nullable=False)
+	source_review_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 	created_at: Mapped[datetime] = mapped_column(
 		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
 	)

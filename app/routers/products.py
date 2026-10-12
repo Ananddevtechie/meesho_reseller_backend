@@ -5,7 +5,9 @@ import time
 import uuid
 from base64 import b64decode
 from typing import Optional
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, status
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -20,7 +22,10 @@ from app.schemas import (
 	ProductCreateRequest,
 	ProductPublic,
 	ProductReviewItem,
+	ProductReviewImportRequest,
+	ProductReviewImportResult,
 	ProductReviewSummary,
+	ProductReviewUpdate,
 )
 from app.services.admin_auth import verify_password
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
@@ -31,6 +36,10 @@ _DUMMY_PASSWORD_HASH = 'pbkdf2_sha256$600000$00000000000000000000000000000000$00
 _MAX_REVIEW_IMAGES = 5
 _MAX_REVIEW_IMAGE_BYTES = 5 * 1024 * 1024
 _REVIEW_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+_MAX_MEESHO_REVIEWS_PER_IMPORT = 100
+_MAX_IMPORTED_IMAGES_PER_REVIEW = 5
+_MAX_IMPORTED_IMAGES_PER_IMPORT = 100
+_MAX_IMPORTED_IMAGE_BYTES_PER_IMPORT = 50 * 1024 * 1024
 _MAX_PRODUCT_IMAGES = 10
 _MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
 _PRODUCT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
@@ -81,6 +90,64 @@ def _valid_image_data(content_type: str, data: bytes) -> bool:
 	if content_type == 'image/png':
 		return data.startswith(b'\x89PNG\r\n\x1a\n')
 	return content_type == 'image/webp' and data.startswith(b'RIFF') and data[8:12] == b'WEBP'
+
+
+async def _download_meesho_review_image(client: httpx.AsyncClient, image_url: str) -> tuple[str, bytes]:
+	parsed_url = urlparse(image_url)
+	if parsed_url.scheme != 'https' or not parsed_url.hostname or not (
+		parsed_url.hostname == 'meesho.com' or parsed_url.hostname.endswith('.meesho.com')
+	):
+		raise HTTPException(
+			status_code=status.HTTP_502_BAD_GATEWAY,
+			detail='The review scraper returned an unsupported image URL.',
+		)
+	try:
+		async with client.stream('GET', image_url) as response:
+			if not response.is_success:
+				raise HTTPException(
+					status_code=status.HTTP_502_BAD_GATEWAY,
+					detail='Could not download a customer review image.',
+				)
+			content_type = response.headers.get('content-type', '').split(';', 1)[0].strip().lower()
+			if content_type not in _REVIEW_IMAGE_TYPES:
+				raise HTTPException(
+					status_code=status.HTTP_502_BAD_GATEWAY,
+					detail='The review scraper returned an unsupported image type.',
+				)
+			content_length = response.headers.get('content-length')
+			if content_length:
+				try:
+					image_size = int(content_length)
+				except ValueError as error:
+					raise HTTPException(
+						status_code=status.HTTP_502_BAD_GATEWAY,
+						detail='The review scraper returned an invalid image size.',
+					) from error
+				if image_size > _MAX_REVIEW_IMAGE_BYTES:
+					raise HTTPException(
+						status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+						detail='A customer review image exceeded the 5 MB limit.',
+					)
+			data = bytearray()
+			async for chunk in response.aiter_bytes():
+				data.extend(chunk)
+				if len(data) > _MAX_REVIEW_IMAGE_BYTES:
+					raise HTTPException(
+						status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+						detail='A customer review image exceeded the 5 MB limit.',
+					)
+	except httpx.HTTPError as error:
+		raise HTTPException(
+			status_code=status.HTTP_502_BAD_GATEWAY,
+			detail='Could not download a customer review image.',
+		) from error
+	image_data = bytes(data)
+	if not _valid_image_data(content_type, image_data):
+		raise HTTPException(
+			status_code=status.HTTP_502_BAD_GATEWAY,
+			detail='The review scraper returned invalid image data.',
+		)
+	return content_type, image_data
 
 
 async def _read_product_image(image: UploadFile) -> tuple[str, bytes]:
@@ -235,6 +302,155 @@ def list_admin_product_reviews(
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load product reviews.') from error
 
 
+@router.post(
+	'/api/admin/products/{slug}/reviews/import',
+	response_model=ProductReviewImportResult,
+)
+async def import_meesho_product_reviews(
+	slug: str,
+	request: ProductReviewImportRequest,
+	authorization: Optional[str] = Header(default=None),
+) -> ProductReviewImportResult:
+	_require_admin(authorization)
+	from app.routers.meesho_reviews import _product_id, _run_scraper
+
+	_product_id(request.meesho_url)
+	try:
+		with SessionLocal() as session:
+			if session.get(Product, slug) is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not look up this product.') from error
+
+	scraped = await _run_scraper(
+		request.meesho_url,
+		max_reviews_per_product=_MAX_MEESHO_REVIEWS_PER_IMPORT,
+	)
+	skipped_count = 0
+	skipped_image_count = 0
+	reviews_to_import = scraped.reviews[:_MAX_MEESHO_REVIEWS_PER_IMPORT]
+	source_ids = [review.id for review in reviews_to_import]
+	try:
+		with SessionLocal() as session:
+			existing_records = list(session.execute(
+				select(ProductReview.source_review_id, ProductReview.id).where(
+					ProductReview.product_id == slug,
+					ProductReview.source_review_id.in_(source_ids),
+				)
+			)) if source_ids else []
+			existing_by_source = {
+				source_id: review_id
+				for source_id, review_id in existing_records
+				if source_id is not None
+			}
+			existing_image_review_ids = set(session.scalars(
+				select(ProductReviewImage.review_id).where(
+					ProductReviewImage.review_id.in_(set(existing_by_source.values()))
+				)
+			)) if existing_by_source else set()
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not check existing reviews.') from error
+
+	new_reviews = []
+	reviews_needing_image_backfill = []
+	seen_ids = set(existing_by_source)
+	processed_source_ids: set[str] = set()
+	for review in reviews_to_import:
+		if review.id in processed_source_ids:
+			continue
+		processed_source_ids.add(review.id)
+		if review.id in seen_ids:
+			skipped_count += 1
+			if (
+				existing_by_source[review.id] not in existing_image_review_ids
+				and review.image_urls
+			):
+				reviews_needing_image_backfill.append(review)
+		else:
+			new_reviews.append(review)
+			seen_ids.add(review.id)
+
+	images_by_source: dict[str, list[tuple[str, bytes]]] = {}
+	stored_image_count = 0
+	stored_image_bytes = 0
+	new_review_ids = {review.id: uuid.uuid4().hex for review in new_reviews}
+	image_candidates = [
+		(review.id, image_url)
+		for review in [*new_reviews, *reviews_needing_image_backfill]
+		for image_url in review.image_urls[:_MAX_IMPORTED_IMAGES_PER_REVIEW]
+	]
+	skipped_image_count += sum(
+		max(0, len(review.image_urls) - _MAX_IMPORTED_IMAGES_PER_REVIEW)
+		for review in [*new_reviews, *reviews_needing_image_backfill]
+	)
+	async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10), follow_redirects=False) as client:
+		for image_index, (source_id, image_url) in enumerate(image_candidates):
+			if (
+				stored_image_count >= _MAX_IMPORTED_IMAGES_PER_IMPORT
+				or stored_image_bytes >= _MAX_IMPORTED_IMAGE_BYTES_PER_IMPORT
+			):
+				skipped_image_count += len(image_candidates) - image_index
+				break
+			content_type, image_data = await _download_meesho_review_image(client, image_url)
+			if stored_image_bytes + len(image_data) > _MAX_IMPORTED_IMAGE_BYTES_PER_IMPORT:
+				skipped_image_count += 1
+				continue
+			images_by_source.setdefault(source_id, []).append((content_type, image_data))
+			stored_image_count += 1
+			stored_image_bytes += len(image_data)
+
+	imported_count = 0
+	backfilled_review_count = 0
+	review_id_by_source = {**existing_by_source, **new_review_ids}
+	try:
+		with SessionLocal() as session:
+			for review in new_reviews:
+				stored_review = ProductReview(
+					id=new_review_ids[review.id],
+					product_id=slug,
+					source_review_id=review.id,
+					reviewer_name=review.reviewer_name,
+					rating=review.rating,
+					comment=review.comment,
+					created_at=review.created_at,
+				)
+				session.add(stored_review)
+				session.flush()
+				for content_type, image_data in images_by_source.get(review.id, []):
+					session.add(ProductReviewImage(
+						id=uuid.uuid4().hex,
+						review_id=stored_review.id,
+						content_type=content_type,
+						image_data=image_data,
+					))
+				imported_count += 1
+			for review in reviews_needing_image_backfill:
+				review_images = images_by_source.get(review.id, [])
+				for content_type, image_data in review_images:
+					session.add(ProductReviewImage(
+						id=uuid.uuid4().hex,
+						review_id=review_id_by_source[review.id],
+						content_type=content_type,
+						image_data=image_data,
+					))
+				if review_images:
+					backfilled_review_count += 1
+			session.commit()
+			summary = _review_summary(session, slug)
+	except IntegrityError as error:
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Some reviews were imported concurrently. Refresh and retry.') from error
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save imported reviews.') from error
+	return ProductReviewImportResult(
+		imported_count=imported_count,
+		skipped_count=skipped_count,
+		backfilled_review_count=backfilled_review_count,
+		saved_image_count=stored_image_count,
+		skipped_image_count=skipped_image_count,
+		reviews=summary,
+	)
+
+
 @router.post('/api/admin/products/{slug}/reviews', response_model=ProductReviewItem, status_code=status.HTTP_201_CREATED)
 async def create_product_review(
 	slug: str,
@@ -288,6 +504,63 @@ async def create_product_review(
 			return _review_summary(session, slug).reviews[0]
 	except SQLAlchemyError as error:
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save the product review.') from error
+
+
+@router.put('/api/admin/products/{slug}/reviews/{review_id}', response_model=ProductReviewItem)
+def update_product_review(
+	slug: str,
+	review_id: str,
+	request: ProductReviewUpdate,
+	authorization: Optional[str] = Header(default=None),
+) -> ProductReviewItem:
+	_require_admin(authorization)
+	try:
+		with SessionLocal() as session:
+			review = session.scalar(select(ProductReview).where(
+				ProductReview.id == review_id,
+				ProductReview.product_id == slug,
+			))
+			if review is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product review not found.')
+			review.reviewer_name = request.reviewer_name
+			review.rating = request.rating
+			review.comment = request.comment
+			session.commit()
+			session.refresh(review)
+			return ProductReviewItem(
+				id=review.id,
+				reviewer_name=review.reviewer_name,
+				rating=review.rating,
+				comment=review.comment,
+				created_at=review.created_at,
+				image_urls=[],
+			)
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not update product review.') from error
+
+
+@router.delete('/api/admin/products/{slug}/reviews/{review_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_product_review(
+	slug: str,
+	review_id: str,
+	authorization: Optional[str] = Header(default=None),
+) -> Response:
+	_require_admin(authorization)
+	try:
+		with SessionLocal() as session:
+			review = session.scalar(select(ProductReview).where(
+				ProductReview.id == review_id,
+				ProductReview.product_id == slug,
+			))
+			if review is None:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product review not found.')
+			for image in session.scalars(select(ProductReviewImage).where(ProductReviewImage.review_id == review_id)):
+				session.delete(image)
+			session.delete(review)
+			session.commit()
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not delete product review.') from error
+	return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get('/api/admin/products', response_model=list[ProductAdmin])

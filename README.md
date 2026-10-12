@@ -82,13 +82,16 @@ Keep the credentials out of source control and use a strong, unique password.
 ## Meesho customer reviews
 
 Set `APIFY_API_TOKEN` in `backend/.env` to enable the Meesho Reviews Scraper.
-Keep the token on the backend; do not add it to frontend settings. For now, the
-reviews endpoint uses a hardcoded Meesho product URL in
-`app/routers/meesho_reviews.py`; the product's **Meesho product link** field is
-not used by this endpoint. The product page fetches reviews through the backend
-scraper proxy; review data is not read from or saved to the product-review
-tables. Results are cached in memory for six hours per backend worker, with up
-to 15 reviews requested per cache miss.
+Keep the token on the backend; do not add it to frontend settings. In the admin
+panel, open **Add reviews**, select a product, enter its Meesho product URL, and
+import up to 100 reviews. Imported customer feedback is stored in
+`product_reviews`, can be edited or deleted in the admin panel, and is displayed
+from the same database on product detail pages. Repeat imports skip source
+reviews already imported for that product.
 
 The Actor is paid from $1.99 per 1,000 results, plus Apify platform usage.
-Loading a product page can start a paid run when its cache is empty or expired.
+An admin-triggered import may start a paid run. The legacy
+`/api/products/{slug}/meesho-reviews` endpoint still uses its temporary
+hardcoded URL and six-hour per-worker cache, and is not used by the storefront.
+Apply the database migration with `alembic upgrade head` before importing
+reviews.
