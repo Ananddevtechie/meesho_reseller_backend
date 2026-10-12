@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 	razorpay_key_secret: str = ''
 	razorpay_checkout_config_id: str = ''
 	razorpay_webhook_secret: str = ''
+	apify_api_token: str = ''
 	telegram_bot_token: str = ''
 	telegram_chat_id: str = ''
 

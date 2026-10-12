@@ -78,3 +78,17 @@ credentials to add products. Login is verified against the `admins` table by
 not stored in the database. Public product pages read active listings from
 `/api/products`, while admin catalog requests verify the same credentials.
 Keep the credentials out of source control and use a strong, unique password.
+
+## Meesho customer reviews
+
+Set `APIFY_API_TOKEN` in `backend/.env` to enable the Meesho Reviews Scraper.
+Keep the token on the backend; do not add it to frontend settings. For now, the
+reviews endpoint uses a hardcoded Meesho product URL in
+`app/routers/meesho_reviews.py`; the product's **Meesho product link** field is
+not used by this endpoint. The product page fetches reviews through the backend
+scraper proxy; review data is not read from or saved to the product-review
+tables. Results are cached in memory for six hours per backend worker, with up
+to 15 reviews requested per cache miss.
+
+The Actor is paid from $1.99 per 1,000 results, plus Apify platform usage.
+Loading a product page can start a paid run when its cache is empty or expired.
