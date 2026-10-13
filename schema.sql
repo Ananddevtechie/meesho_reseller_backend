@@ -69,6 +69,12 @@ CREATE TABLE product_review_images (
     image_data BYTEA NOT NULL
 );
 
+CREATE INDEX ix_product_reviews_product_created_at
+    ON product_reviews (product_id, created_at);
+
+CREATE INDEX ix_product_review_images_review_id
+    ON product_review_images (review_id);
+
 CREATE TABLE customers (
     id VARCHAR(141) PRIMARY KEY,
     full_name VARCHAR(120) NOT NULL,

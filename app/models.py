@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -82,6 +82,7 @@ class ProductReview(Base):
 	__table_args__ = (
 		CheckConstraint('rating >= 1 AND rating <= 5', name='ck_product_reviews_rating_range'),
 		UniqueConstraint('product_id', 'source_review_id', name='uq_product_reviews_source_review'),
+		Index('ix_product_reviews_product_created_at', 'product_id', 'created_at'),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -99,7 +100,7 @@ class ProductReviewImage(Base):
 	__tablename__ = 'product_review_images'
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-	review_id: Mapped[str] = mapped_column(ForeignKey('product_reviews.id', ondelete='CASCADE'), nullable=False)
+	review_id: Mapped[str] = mapped_column(ForeignKey('product_reviews.id', ondelete='CASCADE'), nullable=False, index=True)
 	content_type: Mapped[str] = mapped_column(String(40), nullable=False)
 	image_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
