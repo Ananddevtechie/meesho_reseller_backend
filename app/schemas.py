@@ -126,7 +126,7 @@ class ProductPublic(BaseModel):
 class ProductAdmin(ProductPublic):
 	cost_price: Decimal
 	is_active: bool
-	meesho_url: Optional[str]
+	meesho_url: Optional[str] = None
 
 
 class ProductReviewItem(BaseModel):
@@ -321,14 +321,35 @@ class OrderTrackingResponse(BaseModel):
 class AdminOrderTrackingResponse(OrderTrackingResponse):
 	customer_name: str
 	customer_mobile: str
+	alternate_mobile: Optional[str]
+	customer_email: Optional[str]
 	address_line1: str
 	address_line2: str
 	landmark: Optional[str]
 	city: str
 	state: str
 	pincode: str
+	mrp: Decimal
+	discount: Decimal
+	shipping: Decimal
+	tax: Decimal
+	cod_fee: Decimal
+	payment_reference: Optional[str]
+	meesho_url: Optional[str]
 
 
 class AdminOrderTrackingUpdate(BaseModel):
 	delivery_status: DeliveryStatus
 	estimated_delivery_date: Optional[date] = None
+	meesho_url: Optional[str] = Field(default=None, max_length=2048)
+
+	@field_validator('meesho_url', mode='before')
+	@classmethod
+	def validate_meesho_url(cls, value: Optional[str]) -> Optional[str]:
+		if isinstance(value, str):
+			value = value.strip()
+			if not value:
+				return None
+			if not value.lower().startswith('https://'):
+				raise ValueError('Meesho product link must use https://.')
+		return value
