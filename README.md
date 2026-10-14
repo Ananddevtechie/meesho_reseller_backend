@@ -77,6 +77,18 @@ credentials to add products. Login is verified against the `admins` table by
 `POST /api/admin/login`, which returns HTTP 200 on success; the raw password is
 not stored in the database. Public product pages read active listings from
 `/api/products`, while admin catalog requests verify the same credentials.
+The active-product list is cached in each backend process for 30 seconds, and
+simultaneous cold-cache requests in a process share one database fetch. The
+public list response is also cacheable at the CDN for 30 seconds; stale catalog
+data can be served while revalidating for up to 24 hours, or when the origin
+errors. This avoids making a visitor wait for a sleeping backend when that CDN
+edge already has a catalog copy. Catalog API logs include request duration and
+list-cache-fill database duration; the list response's `X-Catalog-Cache` header
+reports `MISS`, `HIT`, or `COALESCED`. Caches are process-local, so separate
+backend workers warm independently. A first request to an edge with no cached
+copy still depends on the backend and database response times; a sleeping
+backend instance must be kept always-on to avoid its cold-start delay on an
+uncached request.
 Keep the credentials out of source control and use a strong, unique password.
 
 ## Meesho customer reviews

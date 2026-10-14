@@ -1,3 +1,5 @@
+import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi.exceptions import RequestValidationError
@@ -17,6 +19,9 @@ from app.routers.products import router as products_router
 from app.services.ai_parser import GeminiExtractionError, extract_address
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
 	check_database_connection()
@@ -24,6 +29,28 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title='Meesho Reseller API', lifespan=lifespan)
+
+
+@app.middleware('http')
+async def log_product_api_timing(request: Request, call_next):
+	path = request.url.path
+	is_product_api = request.method == 'GET' and (
+		path == '/api/products' or (path.startswith('/api/products/') and path.count('/') == 3)
+	)
+	if not is_product_api:
+		return await call_next(request)
+
+	started_at = time.perf_counter()
+	response = await call_next(request)
+	logger.info(
+		'product_api_request method=%s path=%s status=%s duration_ms=%.2f cache=%s',
+		request.method,
+		path,
+		response.status_code,
+		(time.perf_counter() - started_at) * 1000,
+		response.headers.get('X-Catalog-Cache', 'not-applicable'),
+	)
+	return response
 
 
 @app.exception_handler(RequestValidationError)

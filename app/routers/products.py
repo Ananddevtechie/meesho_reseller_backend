@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 import threading
 import time
 import uuid
@@ -32,6 +33,7 @@ from app.services.order_notification_delivery import deliver_order_notification,
 
 
 router = APIRouter(tags=['products'])
+logger = logging.getLogger(__name__)
 _DUMMY_PASSWORD_HASH = 'pbkdf2_sha256$600000$00000000000000000000000000000000$0000000000000000000000000000000000000000000000000000000000000000'
 _MAX_REVIEW_IMAGES = 5
 _MAX_REVIEW_IMAGE_BYTES = 5 * 1024 * 1024
@@ -46,6 +48,7 @@ _PRODUCT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 _PRODUCT_LIST_CACHE_TTL_SECONDS = 30
 _PRODUCT_REVIEW_CACHE_TTL_SECONDS = 30
 _product_list_cache_lock = threading.Lock()
+_product_list_cache_refresh_lock = threading.Lock()
 _product_list_cache: tuple[float, list[Product]] | None = None
 _product_list_cache_generation = 0
 _product_review_cache_lock = threading.Lock()
@@ -255,21 +258,41 @@ def admin_login(request: AdminLoginRequest) -> AdminLoginResponse:
 @router.get('/api/products', response_model=list[ProductPublic])
 def list_products(response: Response) -> list[Product]:
 	global _product_list_cache
-	response.headers['Cache-Control'] = 'public, max-age=0, s-maxage=30, stale-while-revalidate=120'
+	response.headers['Cache-Control'] = (
+		'public, max-age=0, s-maxage=30, '
+		'stale-while-revalidate=86400, stale-if-error=86400'
+	)
 	with _product_list_cache_lock:
 		if _product_list_cache is not None and _product_list_cache[0] > time.monotonic():
+			response.headers['X-Catalog-Cache'] = 'HIT'
 			return list(_product_list_cache[1])
-		cache_generation = _product_list_cache_generation
-	try:
-		with SessionLocal() as session:
-			products = list(session.scalars(
-				select(Product).where(Product.is_active.is_(True)).order_by(Product.created_at.desc())
-			))
-	except SQLAlchemyError as error:
-		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load products.') from error
-	with _product_list_cache_lock:
-		if cache_generation == _product_list_cache_generation:
-			_product_list_cache = (time.monotonic() + _PRODUCT_LIST_CACHE_TTL_SECONDS, products)
+
+	with _product_list_cache_refresh_lock:
+		with _product_list_cache_lock:
+			if _product_list_cache is not None and _product_list_cache[0] > time.monotonic():
+				response.headers['X-Catalog-Cache'] = 'COALESCED'
+				return list(_product_list_cache[1])
+			cache_generation = _product_list_cache_generation
+
+		database_started_at = time.perf_counter()
+		try:
+			with SessionLocal() as session:
+				products = list(session.scalars(
+					select(Product).where(Product.is_active.is_(True)).order_by(Product.created_at.desc())
+				))
+		except SQLAlchemyError as error:
+			logger.warning(
+				'product_list_cache_fill_failed database_ms=%.2f',
+				(time.perf_counter() - database_started_at) * 1000,
+			)
+			raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not load products.') from error
+
+		database_duration_ms = (time.perf_counter() - database_started_at) * 1000
+		with _product_list_cache_lock:
+			if cache_generation == _product_list_cache_generation:
+				_product_list_cache = (time.monotonic() + _PRODUCT_LIST_CACHE_TTL_SECONDS, products)
+		logger.info('product_list_cache_fill products=%d database_ms=%.2f', len(products), database_duration_ms)
+		response.headers['X-Catalog-Cache'] = 'MISS'
 	return products
 
 
