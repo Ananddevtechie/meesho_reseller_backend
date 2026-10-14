@@ -72,6 +72,9 @@ CREATE TABLE product_review_images (
 CREATE INDEX ix_product_reviews_product_created_at
     ON product_reviews (product_id, created_at);
 
+CREATE INDEX ix_product_reviews_product_rating_created_at
+    ON product_reviews (product_id, rating, created_at);
+
 CREATE INDEX ix_product_review_images_review_id
     ON product_review_images (review_id);
 

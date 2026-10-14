@@ -83,6 +83,7 @@ class ProductReview(Base):
 		CheckConstraint('rating >= 1 AND rating <= 5', name='ck_product_reviews_rating_range'),
 		UniqueConstraint('product_id', 'source_review_id', name='uq_product_reviews_source_review'),
 		Index('ix_product_reviews_product_created_at', 'product_id', 'created_at'),
+		Index('ix_product_reviews_product_rating_created_at', 'product_id', 'rating', 'created_at'),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))

@@ -89,6 +89,9 @@ backend workers warm independently. A first request to an edge with no cached
 copy still depends on the backend and database response times; a sleeping
 backend instance must be kept always-on to avoid its cold-start delay on an
 uncached request.
+Public product reviews return ten items per request by default, with `offset`
+and `limit` query parameters for pagination. The average rating and review
+count in the response remain totals across all reviews.
 Keep the credentials out of source control and use a strong, unique password.
 
 ## Meesho customer reviews

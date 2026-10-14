@@ -9,8 +9,8 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, status
-from sqlalchemy import select, update
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Response, UploadFile, status
+from sqlalchemy import case, exists, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from pydantic import ValidationError
 
@@ -52,8 +52,8 @@ _product_list_cache_refresh_lock = threading.Lock()
 _product_list_cache: tuple[float, list[Product]] | None = None
 _product_list_cache_generation = 0
 _product_review_cache_lock = threading.Lock()
-_product_review_cache: dict[str, tuple[float, ProductReviewSummary]] = {}
-_product_review_request_locks: dict[str, threading.Lock] = {}
+_product_review_cache: dict[tuple[str, int, int], tuple[float, ProductReviewSummary]] = {}
+_product_review_request_locks: dict[tuple[str, int, int], threading.Lock] = {}
 _product_review_cache_generation = 0
 
 
@@ -72,73 +72,98 @@ def _invalidate_product_review_cache(slug: str | None = None) -> None:
 		if slug is None:
 			_product_review_cache.clear()
 		else:
-			_product_review_cache.pop(slug, None)
+			for cache_key in [key for key in _product_review_cache if key[0] == slug]:
+				_product_review_cache.pop(cache_key, None)
 
 
-def _review_summary(session, slug: str, active_only: bool = False) -> ProductReviewSummary:
-	statement = (
+def _review_summary(
+	session,
+	slug: str,
+	active_only: bool = False,
+	offset: int = 0,
+	limit: int | None = None,
+) -> ProductReviewSummary:
+	summary_statement = (
 		select(
 			Product.id,
-			ProductReview.id,
-			ProductReview.reviewer_name,
-			ProductReview.rating,
-			ProductReview.comment,
-			ProductReview.created_at,
-			ProductReviewImage.id,
+			func.count(ProductReview.id),
+			func.coalesce(func.avg(ProductReview.rating), 0),
 		)
 		.select_from(Product)
 		.outerjoin(ProductReview, ProductReview.product_id == Product.id)
-		.outerjoin(ProductReviewImage, ProductReviewImage.review_id == ProductReview.id)
 		.where(Product.id == slug)
-		.order_by(ProductReview.created_at.desc())
+		.group_by(Product.id)
 	)
 	if active_only:
-		statement = statement.where(Product.is_active.is_(True))
-
-	rows = session.execute(statement)
-	reviews_by_id: dict[str, ProductReviewItem] = {}
-	product_found = False
-	for _, review_id, reviewer_name, rating, comment, created_at, image_id in rows:
-		product_found = True
-		if review_id is None:
-			continue
-		review = reviews_by_id.get(review_id)
-		if review is None:
-			review = ProductReviewItem(
-				id=review_id,
-				reviewer_name=reviewer_name,
-				rating=rating,
-				comment=comment,
-				created_at=created_at,
-				image_urls=[],
-			)
-			reviews_by_id[review_id] = review
-		if image_id is not None:
-			review.image_urls.append(f'/api/products/{slug}/reviews/{review_id}/images/{image_id}')
-
-	if not product_found:
+		summary_statement = summary_statement.where(Product.is_active.is_(True))
+	summary_row = session.execute(summary_statement).one_or_none()
+	if summary_row is None:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+	_, review_count, average_rating = summary_row
 
-	items = list(reviews_by_id.values())
-	average_rating = round(sum(item.rating for item in items) / len(items), 1) if items else 0.0
-	return ProductReviewSummary(average_rating=average_rating, review_count=len(items), reviews=items)
+	review_statement = select(ProductReview).where(ProductReview.product_id == slug)
+	if limit is not None:
+		review_statement = review_statement.order_by(
+			ProductReview.rating.desc(),
+			case(
+				(exists(select(1).where(ProductReviewImage.review_id == ProductReview.id)), 1),
+				else_=0,
+			).desc(),
+			ProductReview.created_at.desc(),
+		).offset(offset).limit(limit)
+	else:
+		review_statement = review_statement.order_by(ProductReview.created_at.desc())
+	reviews = list(session.scalars(review_statement))
+	review_ids = [review.id for review in reviews]
+	image_rows = session.execute(
+		select(ProductReviewImage.review_id, ProductReviewImage.id)
+		.where(ProductReviewImage.review_id.in_(review_ids))
+		.order_by(ProductReviewImage.id)
+	) if review_ids else []
+	image_ids_by_review: dict[str, list[str]] = {}
+	for review_id, image_id in image_rows:
+		image_ids_by_review.setdefault(review_id, []).append(image_id)
+
+	reviews_by_id: dict[str, ProductReviewItem] = {}
+	for review in reviews:
+		reviews_by_id[review.id] = ProductReviewItem(
+			id=review.id,
+			reviewer_name=review.reviewer_name,
+			rating=review.rating,
+			comment=review.comment,
+			created_at=review.created_at,
+			image_urls=[
+				f'/api/products/{slug}/reviews/{review.id}/images/{image_id}'
+				for image_id in image_ids_by_review.get(review.id, [])
+			],
+		)
+
+	return ProductReviewSummary(
+		average_rating=round(float(average_rating), 1),
+		review_count=review_count,
+		reviews=list(reviews_by_id.values()),
+	)
 
 
-def _cached_product_review_summary(slug: str) -> ProductReviewSummary:
+def _cached_product_review_summary(slug: str, offset: int, limit: int) -> ProductReviewSummary:
+	cache_key = (slug, offset, limit)
 	with _product_review_cache_lock:
-		request_lock = _product_review_request_locks.setdefault(slug, threading.Lock())
+		request_lock = _product_review_request_locks.setdefault(cache_key, threading.Lock())
 	with request_lock:
 		now = time.monotonic()
 		with _product_review_cache_lock:
-			cached = _product_review_cache.get(slug)
+			cached = _product_review_cache.get(cache_key)
 			if cached is not None and cached[0] > now:
 				return cached[1]
 			cache_generation = _product_review_cache_generation
 		with SessionLocal() as session:
-			summary = _review_summary(session, slug, active_only=True)
+			summary = _review_summary(session, slug, active_only=True, offset=offset, limit=limit)
 		with _product_review_cache_lock:
 			if cache_generation == _product_review_cache_generation:
-				_product_review_cache[slug] = (time.monotonic() + _PRODUCT_REVIEW_CACHE_TTL_SECONDS, summary)
+				_product_review_cache[cache_key] = (
+					time.monotonic() + _PRODUCT_REVIEW_CACHE_TTL_SECONDS,
+					summary,
+				)
 		return summary
 
 
@@ -332,9 +357,18 @@ def get_product_image(slug: str, image_id: str) -> Response:
 
 
 @router.get('/api/products/{slug}/reviews', response_model=ProductReviewSummary)
-def get_product_reviews(slug: str) -> ProductReviewSummary:
+def get_product_reviews(
+	slug: str,
+	response: Response,
+	offset: int = Query(default=0, ge=0),
+	limit: int = Query(default=10, ge=1, le=50),
+) -> ProductReviewSummary:
+	response.headers['Cache-Control'] = (
+		'public, max-age=0, s-maxage=30, '
+		'stale-while-revalidate=120, stale-if-error=120'
+	)
 	try:
-		return _cached_product_review_summary(slug)
+		return _cached_product_review_summary(slug, offset, limit)
 	except HTTPException:
 		raise
 	except SQLAlchemyError as error:
