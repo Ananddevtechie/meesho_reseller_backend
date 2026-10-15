@@ -341,15 +341,3 @@ class AdminOrderTrackingResponse(OrderTrackingResponse):
 class AdminOrderTrackingUpdate(BaseModel):
 	delivery_status: DeliveryStatus
 	estimated_delivery_date: Optional[date] = None
-	meesho_url: Optional[str] = Field(default=None, max_length=2048)
-
-	@field_validator('meesho_url', mode='before')
-	@classmethod
-	def validate_meesho_url(cls, value: Optional[str]) -> Optional[str]:
-		if isinstance(value, str):
-			value = value.strip()
-			if not value:
-				return None
-			if not value.lower().startswith('https://'):
-				raise ValueError('Meesho product link must use https://.')
-		return value

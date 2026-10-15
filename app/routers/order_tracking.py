@@ -119,13 +119,9 @@ def update_admin_order_tracking(
 					status_code=status.HTTP_409_CONFLICT,
 					detail='Delivery tracking can only be updated for confirmed orders.',
 				)
-			url_was_provided = 'meesho_url' in request.model_fields_set
 			product = session.get(Product, order.product_id)
-			if url_was_provided and product is None and request.meesho_url is not None:
-				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='The product linked to this order was not found.')
 			status_changed = order.delivery_status != request.delivery_status
 			date_changed = order.estimated_delivery_date != request.estimated_delivery_date
-			url_changed = url_was_provided and product is not None and product.meesho_url != request.meesho_url
 			if status_changed or date_changed:
 				order.delivery_status = request.delivery_status
 				order.estimated_delivery_date = request.estimated_delivery_date
@@ -136,9 +132,7 @@ def update_admin_order_tracking(
 					estimated_delivery_date=order.estimated_delivery_date,
 					created_at=datetime.now(timezone.utc),
 				))
-			if url_changed and product is not None:
-				product.meesho_url = request.meesho_url
-			if status_changed or date_changed or url_changed:
+			if status_changed or date_changed:
 				session.commit()
 			session.refresh(order)
 			return _tracking_response(session, order, admin=True, meesho_url=product.meesho_url if product else None)
