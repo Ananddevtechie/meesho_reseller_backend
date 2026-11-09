@@ -333,6 +333,28 @@ def get_product(slug: str) -> Product:
 	return product
 
 
+@router.post('/api/products/{slug}/order-click', status_code=status.HTTP_204_NO_CONTENT)
+def record_order_now_click(slug: str) -> Response:
+	try:
+		with SessionLocal() as session:
+			result = session.execute(
+				update(Product)
+				.where(Product.id == slug, Product.is_active.is_(True))
+				.values(order_now_clicks=Product.order_now_clicks + 1)
+			)
+			if result.rowcount == 0:
+				raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Product not found.')
+			session.commit()
+	except HTTPException:
+		raise
+	except SQLAlchemyError as error:
+		raise HTTPException(
+			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+			detail='Could not record this product click.',
+		) from error
+	return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get('/api/products/{slug}/images/{image_id}')
 def get_product_image(slug: str, image_id: str) -> Response:
 	try:

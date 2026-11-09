@@ -27,6 +27,8 @@ account with a salted password hash.
 
 The Razorpay and COD flows write orders to `orders`, and catalog listings are
 stored in `products`. Customer details are stored separately in `customers`.
+Each storefront **Order now** click increments `products.order_now_clicks`;
+the admin catalog displays the total for each product.
 COD orders are committed before Telegram notification delivery, and the client supplies an
 `Idempotency-Key` so retries cannot create duplicate orders. Notification status,
 attempt count, and the last delivery error are stored on the order. Telegram retries

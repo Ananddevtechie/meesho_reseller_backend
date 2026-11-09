@@ -32,6 +32,7 @@ CREATE TABLE products (
     package_contents JSON NOT NULL DEFAULT '[]',
     faqs JSON NOT NULL DEFAULT '[]',
     is_active BOOLEAN NOT NULL,
+    order_now_clicks INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
     CONSTRAINT uq_products_sku UNIQUE (sku)

@@ -127,6 +127,7 @@ class ProductAdmin(ProductPublic):
 	cost_price: Decimal
 	is_active: bool
 	meesho_url: Optional[str] = None
+	order_now_clicks: int
 
 
 class ProductReviewItem(BaseModel):

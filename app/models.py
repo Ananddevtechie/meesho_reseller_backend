@@ -57,6 +57,7 @@ class Product(Base):
 	package_contents: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 	faqs: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
 	is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+	order_now_clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 	created_at: Mapped[datetime] = mapped_column(
 		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
 	)
