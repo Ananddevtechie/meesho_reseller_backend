@@ -199,6 +199,22 @@ class CodOrderRequest(BaseModel):
 		return value
 
 
+class EbookPaymentOrderRequest(BaseModel):
+	product_id: str = Field(min_length=1, max_length=100)
+	quantity: Literal[1] = 1
+	full_name: str = Field(min_length=2, max_length=120)
+	customer_email: str = Field(min_length=3, max_length=254, pattern=r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+	mobile: str = Field(pattern=r'^[6-9][0-9]{9}$')
+
+	@field_validator('full_name', 'customer_email')
+	@classmethod
+	def normalize_required_text(cls, value: str) -> str:
+		normalized = value.strip()
+		if not normalized:
+			raise ValueError('This field cannot be blank.')
+		return normalized
+
+
 class CodOrderCancellationRequest(BaseModel):
 	mobile: str = Field(pattern=r'^[6-9][0-9]{9}$')
 

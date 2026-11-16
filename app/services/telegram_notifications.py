@@ -32,6 +32,11 @@ def _address_lines(order: dict[str, Any]) -> list[str]:
 
 def _message(order: dict[str, Any], *, cancelled: bool = False) -> str:
     payment_method = 'COD' if order['payment_method'] == 'COD' else 'Online payment'
+    delivery_lines = (
+    	('DIGITAL DELIVERY', 'No shipping required.')
+    	if order.get('expected_delivery_range') == 'Instant digital access'
+    	else ('DELIVERY ADDRESS', *_address_lines(order))
+    )
     payment_status = {
         'COD_PENDING': 'COD Pending',
         'PAID': 'Paid',
@@ -52,8 +57,7 @@ def _message(order: dict[str, Any], *, cancelled: bool = False) -> str:
             f"Alternate phone: {order.get('alternate_mobile') or 'Not provided'}",
             f"Email: {order.get('customer_email') or 'Not provided'}",
             '',
-            'DELIVERY ADDRESS',
-            *_address_lines(order),
+            *delivery_lines,
             '',
             'PRODUCT',
             f"{order['product_title']} (SKU: {order['product_sku']})",

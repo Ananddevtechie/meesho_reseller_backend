@@ -14,6 +14,7 @@ from app.database import SessionLocal
 from app.models import Customer, Order, OrderTrackingEvent, Product
 from app.schemas import (
 	CodOrderRequest,
+	EbookPaymentOrderRequest,
 	PaidOrderResponse,
 	PaymentStatusResponse,
 	RazorpayOrderResponse,
@@ -197,6 +198,107 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		customer_name=customer_details['full_name'],
 		customer_mobile=customer_details['mobile'],
 		customer_email=customer_details['email'],
+	)
+
+
+@router.post('/digital-orders', response_model=RazorpayOrderResponse, status_code=status.HTTP_201_CREATED)
+def create_digital_payment_order(request: EbookPaymentOrderRequest) -> RazorpayOrderResponse:
+	if not razorpay_is_configured():
+		raise HTTPException(
+			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+			detail='Razorpay is not configured. Set the Razorpay test API keys in backend/.env.',
+		)
+
+	with SessionLocal() as session:
+		product = session.get(Product, request.product_id)
+		if not product or not product.is_active:
+			raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This eBook is no longer available.')
+		if product.category.strip().lower() not in {'book', 'ebook'}:
+			raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Digital checkout is only available for eBooks.')
+		if product.selling_price <= 0 or product.mrp < product.selling_price:
+			raise HTTPException(
+				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+				detail='Store pricing is not configured correctly.',
+			)
+
+		subtotal = product.selling_price
+		discount = product.mrp - product.selling_price
+		total = subtotal
+		product_title = product.title
+		product_sku = product.sku
+		product_mrp = product.mrp
+		product_price = product.selling_price
+		product_currency = product.currency
+
+	amount = int((total * 100).to_integral_exact())
+	if amount < 100:
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail='The minimum payment amount is ₹1.00.',
+		)
+
+	order_id = f"ORD-{uuid.uuid4().hex[:16].upper()}"
+	try:
+		provider_order_id = create_razorpay_order(amount, order_id, settings.razorpay_checkout_config_id or None)
+	except RazorpayAuthenticationError as error:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
+	except RazorpayError as error:
+		raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(error)) from error
+
+	order = Order(
+		id=order_id,
+		idempotency_key=f'UPI-{provider_order_id}',
+		request_fingerprint=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
+		product_id=request.product_id,
+		customer_id=None,
+		product_sku=product_sku,
+		product_title=product_title,
+		quantity=request.quantity,
+		unit_price=product_price,
+		mrp=product_mrp,
+		subtotal=subtotal,
+		discount=discount,
+		shipping=Decimal('0.00'),
+		tax=Decimal('0.00'),
+		cod_fee=Decimal('0.00'),
+		total=total,
+		currency=product_currency,
+		payment_method='UPI',
+		payment_status='PAYMENT_PENDING',
+		order_status='PAYMENT_PENDING',
+		payment_reference=provider_order_id,
+		customer_name=request.full_name,
+		customer_email=request.customer_email,
+		customer_mobile=request.mobile,
+		alternate_mobile=None,
+		address_line1='Digital delivery (no shipping)',
+		address_line2='',
+		landmark=None,
+		city='Digital',
+		state='Digital',
+		pincode='000000',
+		expected_delivery_range='Instant digital access',
+		notification_status='PENDING',
+		notification_attempts=0,
+	)
+	try:
+		with SessionLocal() as session:
+			session.add(order)
+			session.commit()
+	except SQLAlchemyError as error:
+		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save the pending order.') from error
+
+	return RazorpayOrderResponse(
+		order_id=order_id,
+		key_id=settings.razorpay_key_id,
+		provider_order_id=provider_order_id,
+		checkout_config_id=settings.razorpay_checkout_config_id or '',
+		amount=amount,
+		currency='INR',
+		product_title=product_title,
+		customer_name=request.full_name,
+		customer_mobile=request.mobile,
+		customer_email=request.customer_email,
 	)
 
 
