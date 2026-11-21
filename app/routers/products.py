@@ -29,6 +29,12 @@ from app.schemas import (
 	ProductReviewUpdate,
 )
 from app.services.admin_auth import verify_password
+from app.services.ebook_delivery import (
+	EbookStorageError,
+	is_book_category,
+	storage_is_configured,
+	upload_private_pdf,
+)
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
 
 
@@ -45,6 +51,7 @@ _MAX_IMPORTED_IMAGE_BYTES_PER_IMPORT = 50 * 1024 * 1024
 _MAX_PRODUCT_IMAGES = 10
 _MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
 _PRODUCT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+_MAX_EBOOK_BYTES = 50 * 1024 * 1024
 _PRODUCT_LIST_CACHE_TTL_SECONDS = 30
 _PRODUCT_REVIEW_CACHE_TTL_SECONDS = 30
 _product_list_cache_lock = threading.Lock()
@@ -714,6 +721,7 @@ async def save_product_with_images(
 	product_data: str = Form(...),
 	main_image: Optional[UploadFile] = File(default=None),
 	additional_images: list[UploadFile] = File(default=[]),
+	ebook_pdf: Optional[UploadFile] = File(default=None),
 	authorization: Optional[str] = Header(default=None),
 ) -> Product:
 	_require_admin(authorization)
@@ -726,6 +734,17 @@ async def save_product_with_images(
 		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product details are invalid.') from error
 	if not isinstance(values, dict):
 		raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product details are invalid.')
+	is_book = is_book_category(values.get('category'))
+	if ebook_pdf is not None and not is_book:
+		raise HTTPException(
+			status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+			detail='A PDF upload is only allowed for products in the Book category.',
+		)
+	if ebook_pdf is not None:
+		slug = values.get('slug')
+		if not isinstance(slug, str):
+			raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Product details are invalid.')
+		values['ebook_storage_path'] = f'books/{slug}.pdf'
 	if main_image is not None and not values.get('image_url'):
 		values['image_url'] = 'uploaded-image'
 	try:
@@ -738,6 +757,37 @@ async def save_product_with_images(
 		uploaded_images.append(await _read_product_image(main_image))
 	for image in additional_images:
 		uploaded_images.append(await _read_product_image(image))
+	ebook_data: Optional[bytes] = None
+	if ebook_pdf is not None:
+		try:
+			content_type = (ebook_pdf.content_type or '').lower()
+			ebook_data = await ebook_pdf.read(_MAX_EBOOK_BYTES + 1)
+			if len(ebook_data) > _MAX_EBOOK_BYTES:
+				raise HTTPException(
+					status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+					detail='The eBook PDF must be 50 MB or smaller.',
+				)
+			if content_type not in {'', 'application/pdf'} or not ebook_data.startswith(b'%PDF-'):
+				raise HTTPException(
+					status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+					detail='Choose a valid PDF file for Book delivery.',
+				)
+		finally:
+			await ebook_pdf.close()
+
+	if ebook_data is not None:
+		if not storage_is_configured():
+			raise HTTPException(
+				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+				detail='Private eBook storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env.',
+			)
+		try:
+			await upload_private_pdf(request.ebook_storage_path or '', ebook_data)
+		except EbookStorageError as error:
+			raise HTTPException(
+				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+				detail='Supabase private storage rejected or could not complete the PDF upload. Check the backend storage logs and private ebooks bucket configuration.',
+			) from error
 
 	try:
 		with SessionLocal() as session:

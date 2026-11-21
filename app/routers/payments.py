@@ -1,7 +1,9 @@
 import hashlib
 import json
+import logging
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -11,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Customer, Order, OrderTrackingEvent, Product
+from app.models import Customer, EbookOrderAccess, Order, OrderTrackingEvent, Product
 from app.schemas import (
 	CodOrderRequest,
 	EbookPaymentOrderRequest,
@@ -21,6 +23,13 @@ from app.schemas import (
 	RazorpayVerificationRequest,
 )
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
+from app.services.ebook_delivery import (
+	EbookDeliveryError,
+	ensure_ebook_entitlement,
+	email_is_configured,
+	is_book_category,
+	storage_is_configured,
+)
 from app.services.razorpay import (
 	RazorpayAuthenticationError,
 	RazorpayError,
@@ -34,6 +43,7 @@ from app.services.razorpay import (
 
 
 router = APIRouter(prefix='/api/payments/razorpay', tags=['payments'])
+logger = logging.getLogger(__name__)
 
 
 def _priced_total(request: CodOrderRequest, product: Product) -> tuple[Decimal, Decimal, Decimal]:
@@ -113,6 +123,11 @@ def create_payment_order(request: CodOrderRequest) -> RazorpayOrderResponse:
 		product = session.get(Product, request.product_id)
 		if not product or not product.is_active:
 			raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This product is no longer available.')
+		if is_book_category(product.category):
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail='Book products must use the digital checkout.',
+			)
 		customer = session.get(Customer, request.customer_id) if request.customer_id else None
 		if not customer:
 			raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Save customer details before starting payment.')
@@ -213,8 +228,13 @@ def create_digital_payment_order(request: EbookPaymentOrderRequest) -> RazorpayO
 		product = session.get(Product, request.product_id)
 		if not product or not product.is_active:
 			raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This eBook is no longer available.')
-		if product.category.strip().lower() not in {'book', 'ebook'}:
-			raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Digital checkout is only available for eBooks.')
+		if not is_book_category(product.category):
+			raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Digital checkout is only available for Book-category products.')
+		if not product.ebook_storage_path:
+			raise HTTPException(
+				status_code=status.HTTP_409_CONFLICT,
+				detail='This Book is not configured for secure digital delivery.',
+			)
 		if product.selling_price <= 0 or product.mrp < product.selling_price:
 			raise HTTPException(
 				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -229,6 +249,16 @@ def create_digital_payment_order(request: EbookPaymentOrderRequest) -> RazorpayO
 		product_mrp = product.mrp
 		product_price = product.selling_price
 		product_currency = product.currency
+	if not storage_is_configured():
+		raise HTTPException(
+			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+			detail='Private eBook storage is not configured on the server.',
+		)
+	if not email_is_configured():
+		raise HTTPException(
+			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+			detail='eBook email delivery is not configured on the server.',
+		)
 
 	amount = int((total * 100).to_integral_exact())
 	if amount < 100:
@@ -238,6 +268,7 @@ def create_digital_payment_order(request: EbookPaymentOrderRequest) -> RazorpayO
 		)
 
 	order_id = f"ORD-{uuid.uuid4().hex[:16].upper()}"
+	download_access_token = secrets.token_urlsafe(32)
 	try:
 		provider_order_id = create_razorpay_order(amount, order_id, settings.razorpay_checkout_config_id or None)
 	except RazorpayAuthenticationError as error:
@@ -284,8 +315,15 @@ def create_digital_payment_order(request: EbookPaymentOrderRequest) -> RazorpayO
 	try:
 		with SessionLocal() as session:
 			session.add(order)
+			session.flush()
+			session.add(EbookOrderAccess(
+				order_id=order_id,
+				token_hash=hashlib.sha256(download_access_token.encode('utf-8')).hexdigest(),
+				expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+			))
 			session.commit()
 	except SQLAlchemyError as error:
+		logger.error('Could not save pending digital payment order (database error type %s).', type(error).__name__)
 		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Could not save the pending order.') from error
 
 	return RazorpayOrderResponse(
@@ -299,6 +337,7 @@ def create_digital_payment_order(request: EbookPaymentOrderRequest) -> RazorpayO
 		customer_name=request.full_name,
 		customer_mobile=request.mobile,
 		customer_email=request.customer_email,
+		download_access_token=download_access_token,
 	)
 
 
@@ -322,7 +361,7 @@ def _validate_captured_payment(provider_order_id: str, payment_id: str, signatur
 
 def _confirm_order(order_id: str, provider_order_id: str, payment_id: str, payment: dict[str, Any]) -> PaidOrderResponse:
 	with SessionLocal() as session:
-		order = session.get(Order, order_id)
+		order = session.scalar(select(Order).where(Order.id == order_id).with_for_update())
 		if not order or order.payment_method != 'UPI':
 			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Payment order was not found.')
 		if order.payment_status == 'PAID':
@@ -334,6 +373,21 @@ def _confirm_order(order_id: str, provider_order_id: str, payment_id: str, payme
 		expected_amount = int((order.total * 100).to_integral_exact())
 		if payment.get('amount') != expected_amount or payment.get('currency') != order.currency:
 			raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Payment amount does not match the order.')
+		product = session.get(Product, order.product_id)
+		has_digital_access = session.get(EbookOrderAccess, order.id) is not None
+		if has_digital_access or (product and is_book_category(product.category)):
+			if not product or not is_book_category(product.category):
+				raise HTTPException(
+					status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+					detail='The Book product is no longer available for digital delivery.',
+				)
+			try:
+				ensure_ebook_entitlement(session, order, product)
+			except EbookDeliveryError as error:
+				raise HTTPException(
+					status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+					detail='The Book order could not be prepared for secure delivery.',
+				) from error
 		order.order_status = 'PLACED'
 		order.payment_status = 'PAID'
 		order.payment_reference = payment_id

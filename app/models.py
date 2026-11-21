@@ -44,6 +44,7 @@ class Product(Base):
 	eyebrow: Mapped[str] = mapped_column(String(120), nullable=False, default='')
 	image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	meesho_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+	ebook_storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	currency: Mapped[str] = mapped_column(String(3), nullable=False, default='INR')
 	cost_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal('0.00'))
 	selling_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
@@ -245,6 +246,90 @@ class Payment(Base):
 	status: Mapped[str] = mapped_column(String(30), nullable=False)
 	amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 	currency: Mapped[str] = mapped_column(String(3), nullable=False, default='INR')
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+	updated_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True),
+		default=lambda: datetime.now(timezone.utc),
+		onupdate=lambda: datetime.now(timezone.utc),
+		nullable=False,
+	)
+
+
+class EbookOrderAccess(Base):
+	__tablename__ = 'ebook_order_access'
+	__table_args__ = (
+		UniqueConstraint('token_hash', name='uq_ebook_order_access_token_hash'),
+	)
+
+	order_id: Mapped[str] = mapped_column(ForeignKey('orders.id', ondelete='CASCADE'), primary_key=True)
+	token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+	expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+
+
+class EbookEntitlement(Base):
+	__tablename__ = 'ebook_entitlements'
+	__table_args__ = (
+		UniqueConstraint('order_id', name='uq_ebook_entitlements_order_id'),
+		CheckConstraint('download_count >= 0', name='ck_ebook_entitlements_download_count'),
+		CheckConstraint('download_limit > 0', name='ck_ebook_entitlements_download_limit'),
+		Index('ix_ebook_entitlements_expiry', 'expires_at'),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	order_id: Mapped[str] = mapped_column(ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+	product_id: Mapped[str] = mapped_column(String(100), nullable=False)
+	storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+	download_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+	download_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+	expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+	revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EbookDownloadToken(Base):
+	__tablename__ = 'ebook_download_tokens'
+	__table_args__ = (
+		UniqueConstraint('token_hash', name='uq_ebook_download_tokens_token_hash'),
+		Index('ix_ebook_download_tokens_entitlement_id', 'entitlement_id'),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	entitlement_id: Mapped[str] = mapped_column(
+		ForeignKey('ebook_entitlements.id', ondelete='CASCADE'), nullable=False
+	)
+	token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+	created_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+	expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+	revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EbookEmailJob(Base):
+	__tablename__ = 'ebook_email_jobs'
+	__table_args__ = (
+		UniqueConstraint('entitlement_id', name='uq_ebook_email_jobs_entitlement_id'),
+		Index('ix_ebook_email_jobs_ready', 'status', 'next_attempt_at'),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+	entitlement_id: Mapped[str] = mapped_column(
+		ForeignKey('ebook_entitlements.id', ondelete='CASCADE'), nullable=False
+	)
+	status: Mapped[str] = mapped_column(String(20), nullable=False, default='PENDING')
+	attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+	next_attempt_at: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+	)
+	locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+	last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 	created_at: Mapped[datetime] = mapped_column(
 		DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
 	)

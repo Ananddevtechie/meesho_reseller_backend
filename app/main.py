@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -11,12 +12,14 @@ from fastapi.responses import JSONResponse, Response
 from app.database import check_database_connection
 from app.schemas import AddressExtractionRequest, ExtractedAddress
 from app.routers.cod_orders import router as cod_orders_router
+from app.routers.ebook_delivery import router as ebook_delivery_router
 from app.routers.customers import router as customers_router
 from app.routers.meesho_reviews import router as meesho_reviews_router
 from app.routers.order_tracking import router as order_tracking_router
 from app.routers.payments import router as payments_router
 from app.routers.products import router as products_router
 from app.services.ai_parser import GeminiExtractionError, extract_address
+from app.services.ebook_delivery import run_email_worker
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +28,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
 	check_database_connection()
-	yield
+	worker = asyncio.create_task(run_email_worker())
+	try:
+		yield
+	finally:
+		worker.cancel()
+		try:
+			await worker
+		except asyncio.CancelledError:
+			pass
 
 
 app = FastAPI(title='Meesho Reseller API', lifespan=lifespan)
@@ -71,6 +82,7 @@ app.add_middleware(
 )
 app.include_router(cod_orders_router)
 app.include_router(customers_router)
+app.include_router(ebook_delivery_router)
 app.include_router(meesho_reviews_router)
 app.include_router(order_tracking_router)
 app.include_router(payments_router)

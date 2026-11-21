@@ -68,6 +68,7 @@ class ProductCreateRequest(BaseModel):
 	eyebrow: str = Field(default='', max_length=120)
 	image_url: str = Field(min_length=1)
 	meesho_url: Optional[str] = Field(default=None, max_length=2048)
+	ebook_storage_path: Optional[str] = Field(default=None, max_length=1024)
 	currency: Literal['INR'] = 'INR'
 	cost_price: Decimal = Field(ge=0)
 	selling_price: Decimal = Field(gt=0)
@@ -86,6 +87,11 @@ class ProductCreateRequest(BaseModel):
 	def validate_prices(self):
 		if self.mrp < self.selling_price:
 			raise ValueError('MRP must be greater than or equal to the selling price.')
+		is_book = self.category.strip().lower() == 'book'
+		if is_book and not self.ebook_storage_path:
+			raise ValueError('A private PDF storage path is required for products in the Book category.')
+		if not is_book and self.ebook_storage_path:
+			raise ValueError('A private PDF storage path can only be set for products in the Book category.')
 		return self
 
 	@field_validator('meesho_url', mode='before')
@@ -97,6 +103,24 @@ class ProductCreateRequest(BaseModel):
 				return None
 			if not value.lower().startswith('https://'):
 				raise ValueError('Meesho product link must use https://.')
+		return value
+
+	@field_validator('ebook_storage_path', mode='before')
+	@classmethod
+	def validate_ebook_storage_path(cls, value: Optional[str]) -> Optional[str]:
+		if not isinstance(value, str):
+			return value
+		value = value.strip()
+		if not value:
+			return None
+		segments = value.split('/')
+		if (
+			value.startswith('/')
+			or '\\' in value
+			or any(segment in {'', '.', '..'} for segment in segments)
+			or not value.lower().endswith('.pdf')
+		):
+			raise ValueError('Enter a relative PDF path inside the private ebooks bucket.')
 		return value
 
 
@@ -127,6 +151,7 @@ class ProductAdmin(ProductPublic):
 	cost_price: Decimal
 	is_active: bool
 	meesho_url: Optional[str] = None
+	ebook_storage_path: Optional[str] = None
 	order_now_clicks: int
 
 
@@ -260,6 +285,12 @@ class RazorpayOrderResponse(BaseModel):
 	customer_name: str
 	customer_mobile: str
 	customer_email: Optional[str]
+	download_access_token: Optional[str] = None
+
+
+class EbookDownloadLinkResponse(BaseModel):
+	download_url: str
+	expires_at: datetime
 
 
 class RazorpayVerificationRequest(BaseModel):

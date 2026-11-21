@@ -42,6 +42,55 @@ target chat. Apply the migrations to rename the existing notification status fie
 Payment, shipment, expense, and
 profit/loss tables remain unused.
 
+## Secure Book PDF delivery
+
+The digital checkout and delivery flow applies only to products whose category
+is `Book` (case-insensitive). In the admin catalog, select a PDF while creating
+or editing a Book product. The backend validates the file and uploads it to the
+private `ebooks` bucket using the server-side service-role key; the stored
+object path is generated from the product slug. The browser never receives a
+permanent Storage URL or the service-role key. The public product API never
+returns the storage path.
+
+Apply the latest migration with `alembic upgrade head`. Revision 0018 adds the
+private `ebooks` bucket (PDF-only, 50 MB limit), the product storage path,
+short-lived download tokens, order entitlements, the hashed checkout access
+credential, and a durable email outbox. The migration forces the bucket's
+`public` flag off and does not add public `storage.objects` policies. The
+repository had no SQL migrations defining application-table RLS policies;
+revision 0018 enables RLS with no client policies on the new eBook access,
+entitlement, download-token, and email-job tables. The backend connects to
+PostgreSQL directly. Keep the Supabase service-role key exclusively in the
+backend environment because it bypasses RLS.
+
+Configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `PUBLIC_API_URL` in
+the backend environment. Configure SMTP with `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, and `EMAIL_FROM`. Port 587
+uses STARTTLS and port 465 uses implicit TLS. Do not start book checkout until
+the private storage and SMTP settings are present; the API rejects a Book
+checkout that has no PDF path or delivery configuration.
+Remote Supabase and SMTP connections require TLS; plain HTTP is accepted only
+for local development hosts.
+
+Razorpay `order.paid` webhook verification remains server-side and independent
+of the browser redirect. Once a captured UPI payment is validated, the backend
+atomically marks the existing order paid, snapshots its private object path in
+an entitlement, and queues an email job. A database-backed worker retries
+transient SMTP failures up to five times. The email link contains a random
+token; the database stores only its SHA-256 hash. The download endpoint checks
+payment, token and entitlement expiry, revocation, and the shared download
+limit before retrieving the PDF with the server-side service-role key. PDFs
+are retrieved by the backend with a 50 MB response limit and are never served
+from a public bucket URL.
+
+Default policy is a 30-day entitlement, 7-day link expiry, and 5 successful
+downloads per paid order. These values can be changed with
+`EBOOK_ENTITLEMENT_TTL_DAYS`, `EBOOK_DOWNLOAD_TOKEN_TTL_HOURS`, and
+`EBOOK_DOWNLOAD_LIMIT`. The payment success screen can mint a link using the
+one-year, hashed checkout handoff credential; email links work independently.
+The checkout handoff credential is not a download token and cannot retrieve a
+file without a paid entitlement.
+
 ## Razorpay checkout
 
 Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `backend/.env` (or the

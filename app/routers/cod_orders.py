@@ -19,6 +19,7 @@ from app.schemas import (
     CodOrderResponse,
 )
 from app.services.order_notification_delivery import deliver_order_notification, is_stale_notification
+from app.services.ebook_delivery import is_book_category
 
 
 router = APIRouter(prefix='/api/orders', tags=['orders'])
@@ -75,6 +76,11 @@ def create_cod_order(
                 product = session.get(Product, request.product_id)
                 if not product or not product.is_active:
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='This product is no longer available.')
+                if is_book_category(product.category):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail='Book products are available through digital checkout only.',
+                    )
                 if (
                     product.selling_price <= 0
                     or product.mrp < product.selling_price

@@ -19,6 +19,7 @@ CREATE TABLE products (
     eyebrow VARCHAR(120) NOT NULL DEFAULT '',
     image_url TEXT,
     meesho_url TEXT,
+    ebook_storage_path TEXT,
     currency VARCHAR(3) NOT NULL DEFAULT 'INR',
     cost_price NUMERIC(12, 2) NOT NULL,
     selling_price NUMERIC(12, 2) NOT NULL,
@@ -227,3 +228,58 @@ CREATE TABLE notifications (
     sent_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
+
+CREATE TABLE ebook_order_access (
+    order_id VARCHAR(40) PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE ebook_entitlements (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(40) NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+    product_id VARCHAR(100) NOT NULL,
+    storage_path TEXT NOT NULL,
+    download_count INTEGER NOT NULL CHECK (download_count >= 0),
+    download_limit INTEGER NOT NULL CHECK (download_limit > 0),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    revoked_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX ix_ebook_entitlements_expiry ON ebook_entitlements(expires_at);
+
+CREATE TABLE ebook_download_tokens (
+    id VARCHAR(36) PRIMARY KEY,
+    entitlement_id VARCHAR(36) NOT NULL REFERENCES ebook_entitlements(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    revoked_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX ix_ebook_download_tokens_entitlement_id ON ebook_download_tokens(entitlement_id);
+
+CREATE TABLE ebook_email_jobs (
+    id VARCHAR(36) PRIMARY KEY,
+    entitlement_id VARCHAR(36) NOT NULL UNIQUE REFERENCES ebook_entitlements(id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL,
+    attempts INTEGER NOT NULL,
+    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    locked_at TIMESTAMP WITH TIME ZONE,
+    last_error TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX ix_ebook_email_jobs_ready ON ebook_email_jobs(status, next_attempt_at);
+
+ALTER TABLE ebook_order_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ebook_entitlements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ebook_download_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ebook_email_jobs ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('ebooks', 'ebooks', FALSE, 52428800, ARRAY['application/pdf']::text[])
+ON CONFLICT (id) DO UPDATE
+SET public = FALSE,
+    file_size_limit = 52428800,
+    allowed_mime_types = ARRAY['application/pdf']::text[];
